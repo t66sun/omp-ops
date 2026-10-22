@@ -276,9 +276,46 @@ barrel 与其中的空实现由 Round 0 一并创建，后续切片只填自己�
 渲染器之所以是 transform 而不是被规则直接调用的函数：规则之间不许互相 import，否则 R1 的 5 个并行切片就
 不再文件互斥。规则只写结构化事实，渲染器独占「怎么把事实变成一行字」。
 
+#### 5.2.1 契约修订（冻结后仍然发生的改动，逐条记录）
+
+冻结是「切片之间不互相等待」，不是「永远不许改」。任何改动都必须由一个已合并的 PR 落地、并且改完立刻通知在飞切片。
+已发生的修订：
+
+| 修订 | 原因 |
+|---|---|
+| `TransformContext` + `apply(o, out, ctx?)` + `runTransforms(o, out, enabled, ctx?)` | 去重协调器需要会话身份（`ctx.agent.id` 或 `PI_SESSION_ID`）才能分桶；把它塞进 observation 会污染工具观测的形状 |
+| `Transform.attach?(host)` + `attachTransforms(host)` | epoch 必须随 `session_before_compact` / `session_compact` / `session_before_switch` / `session_before_branch` 前进，而这些事件的订阅点在宿主 API 上，只能在装配期接 |
+| `ToolObservation.callId?` | 去重提示要指名「正文已在 tool call X 中」，没有 call id 就只能说「已在上下文中」，信息量差一截 |
+| `rewriteBody(body, callId, messageId?)` | omp 没有 message id，`messageId` 变可选；缺省时提示只指名调用 |
+| `continuationFor(o: ToolObservation, facts)` 取代 `(tool, args, facts)` | 续读游标长在 `details.meta.truncation` 里，不在覆盖度事实里 |
+
+**没有改的东西同样要记**：`runTransforms` 的顺序 = `extension/index.ts` 的 import 顺序（`rules` → `render` → `dedup`），
+因为规则只写 `details[OUTCOME_KEY]`、渲染器是唯一写 `content` 的切片、去重最后读最终正文。
+
 ### 5.3 轮次表
 
 每个 PR 的规模按 `AGENTS.md` 的「≤1000 实现行」留足余量；并行度写在小节标题里。
+
+**进度快照**（截至 `396e56c`，共 180 项测试 / 179 通过 / 1 跳过；跳过项是 Windows 上 `EPERM` 的符号链接用例）：
+
+| 轮次 | 切片 | 状态 |
+|---|---|---|
+| — | `docs/porting-plan` | ✅ #1 `13d32e7` |
+| 0 | `contract/spine` | ✅ #2 `c4a3f6e` |
+| 0 | `contract/runtime` | ✅ #9 |
+| 1 | `honesty/render` | ✅ #3 `0dc2d3b` |
+| 1 | `honesty/bash` | ✅ #11 `cfd0b9e` |
+| 1 | `honesty/eval` | ✅ #10 `7e8e6bc` |
+| 1 | `honesty/search` | ✅ #13 `bc7391d` |
+| 1 | `honesty/file` | ⏳ 进行中 |
+| 2 | `dedup/store` | ✅ #7 `0504f4e` |
+| 2 | `dedup/evidence` | ✅ #6 `88b32b0` |
+| 2 | `dedup/rewrite` | ✅ #5 `b43bbd0` |
+| 2 | `dedup/coordinator` | ✅ #12 `9093c64` |
+| 2 | `dedup/target-read` | ✅ #8 `f3c4b03` |
+| 2 | `dedup/target-grep` | ✅ #4 `42c9cbf` |
+| 3 | `ptc/outcome` | ✅ #14 `396e56c` |
+| 3 | `ptc/continuation`、`ptc/js`、`ptc/py`、`ptc/prelude` | ⏳ 进行中 |
 
 #### Round 0 · 契约地基（串行，2 个 PR）
 
@@ -407,9 +444,9 @@ graph LR
 | # | 假设 | 状态 | 证伪后果 |
 |---|---|---|---|
 | H1 | 扩展的 `tool_result` 处理器能改写**内置** `read` 的 `content` | ✅ 已实测 | 去重层不成立，只能降级为 `additionalContext` 提示（收益大打折扣） |
-| H2 | `read` 在 `execute` 阶段记录 seen lines，晚于它的 `content` 改写不影响 `edit.enforceSeenLines` | 待验证 | 去重与编辑安全冲突，需改为「只在无编辑意图时去重」 |
+| H2 | `read` 在 `execute` 阶段记录 seen lines，晚于它的 `content` 改写不影响 `edit.enforceSeenLines` | ✅ 已实测 | 去重与编辑安全冲突，需改为「只在无编辑意图时去重」 |
 | H3 | `details.displayContent` 与 `content` 分离，改 `content` 不影响 TUI 渲染 | ✅ 结构已确认，视觉待 0b 确认 | 去重会让人类看不到内容，须放弃或加 UI 开关 |
-| H4 | 扩展能从 `tool_result` 拿到 `details` 并附加 `details.outcome` 而不被后续处理器覆盖 | 待验证 | 诚实协议只能走 `additionalContext`，Round 3 的 typed 消费端失效 |
+| H4 | 扩展能从 `tool_result` 拿到 `details` 并附加 `details.outcome` 而不被后续处理器覆盖 | ✅ 已实测 | 诚实协议只能走 `additionalContext`，Round 3 的 typed 消费端失效 |
 | H5 | `eval` 能注入 `ops` 全局（extension prelude）或至少 `%load` 一个 helper 文件 | 待验证 | Round 3 退化为纯 helper 文件方案（可接受，但文档与入口需改） |
 | H6 | marketplace 安装会执行插件自身的 `bun install`（即带原生依赖的插件可走 marketplace） | 待验证 | 只能走 `omp plugin install <npm\|git>`；marketplace 仅适合零依赖插件，Round 6 的发布形态要改 |
 | H7 | 安装期 `#validateInstalledExtensions` 容忍 factory 里注册事件处理器（不视为初始化失败） | ✅ 已实测 | 注册必须推迟到 `session_start`，Round 0 的装配方式与测试方式都要改 |
@@ -439,6 +476,33 @@ graph LR
    `ReadRecord.revision` 是**我们生成的**值而非宿主给的。
 6. `omp plugin link` 只做文件系统挂载，**不导入扩展**（link 成功时零日志），所以装配失败要到会话启动才暴露。
    这意味着 R6 的安装验收必须实跑一次会话，不能只看 `link` 返回码。
+
+#### 5.4.2 真实会话中的端到端证据
+
+`omp/scripts/smoke.mjs`（无依赖，`node omp/scripts/smoke.mjs`）在临时工程里用
+`omp -p --mode json -e <abs>/omp/src/extension/index.ts` 实跑，只断言 `tool_execution_end.result`，
+不看模型散文。它已证明能咬人：对着 stub 规则跑会报 `details["outcome.v1"] is missing`。
+
+7. **诚实协议活体通过**：`bash` 跑 `false`，模型看到的内容末尾是
+   `[outcome: error · effect unknown · retry after-input-change]`，`details['outcome.v1']` 同时成立。
+   注意 `errorPolicy('EXIT_CODE','unknown')` 会**先**命中 `effectState === 'unknown'` 分支返回 `unknown/never`，
+   `EXIT_CODE` 的 `after-input-change` 例外只能由**生产者**显式发布 retry 来表达——`kernel/errors.ts` 的注释说的就是这个。
+8. **去重活体通过**：同一文件连读两次，第一次 1101 B，第二次 173 B，以
+   `[Notice: Unchanged file range; body already present in the current model context in tool call …]` 开头；
+   连续 5 次全部命中。
+9. **一个已知的安全失败**：7 次观测中有 1 次未命中（1101/1101），不可复现。
+   原因是 `key` 里包含**原始** `args`（忠实于 dsh-ops），路径拼写不同就必然 miss。
+   选择**不修**：归一化 `args` 会让不同的行区间撞 key，收益远小于风险。miss 只会退回全文，不会给出错误结论。
+
+#### 5.4.3 关键宿主形状（按实测记录，不要再猜）
+
+| 目标 | 实测形状 | 陷阱 |
+|---|---|---|
+| `read` 截断 | `details.truncation = {truncated, truncatedBy:'lines', totalLines, outputLines, lastLinePartial, firstLineExceedsLimit}`；游标在 `details.meta.truncation = {direction:'head', shownRange:{start,end}, nextOffset}` | **`totalBytes` 不可信**：一个 ~61 KB 的文件也报 1577（等于 `outputBytes`）。续读只能用 `nextOffset` |
+| `grep` 分页 | `{matchCount, fileCount, truncated, fileLimitReached, perFileLimitReached, linesTruncated, missingPaths}`；两个 limit 字段命中时是**限制值**（数字），未命中时**键不存在** | 存在性才是标志，别和 `false` 比较 |
+| `grep` 2000 上限 | 300 文件 × 10 匹配：首页 `matchCount:200, fileCount:20, truncated:true`；`skip:199` → 1 文件；`skip:200` → `matchCount:0, fileCount:0, truncated:false`，而 `f200..f299` 存在且匹配 | **宿主缺陷**：内部 `maxCount:2000` 静默截断。`matchCount` 永远到不了 2000（单页上限 20 文件 × 20 匹配 = 200）。唯一可靠的推论是「**分页调用永不称完整**」——已写成规则：`skip > 0` ⇒ `partial` + `truncatedBy:'row-limit'` |
+| `eval` 失败 | `details = {language, languages, cells:[{code, language, output, status, exitCode?, durationMs}], isError?}` | 超时**没有 `exitCode`**，只有 `durationMs` 与 `[eval cell timed out …]`；JS worker 退出是 `Error: JS eval worker exited with code N`；内核被杀是 `[Kernel died during execution; completion is uncertain…]` |
+| 被拒调用 | 被拒的调用**根本不产生 `tool_result`**（只有 `tool_execution_start/end` + `tool_approval_resolved`） | `denied` 事实只能在 `tool_execution_end` 路径上生成，`tool_result` 路径永远看不到拒绝 |
 
 ### 5.5 PR 契约（每个切片都必须满足）
 
