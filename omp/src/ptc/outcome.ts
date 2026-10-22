@@ -5,8 +5,17 @@
  */
 import { errorPolicy } from '../kernel/errors.ts'
 import type { CoverageMeta, EffectState, Outcome } from '../kernel/outcome.ts'
-import { OUTCOME_KEY, readOutcome, type OutcomeFacts, type ToolObservation } from '../host/contracts.ts'
+import { OUTCOME_KEY, readOutcome, type ToolObservation } from '../host/contracts.ts'
+import {
+  continuationFor as continuationFromObservation,
+  continuationForTool,
+  MAX_TOKEN_BYTES,
+  PREFIX,
+} from './continuation.ts'
 import { count, record, type CanonicalData, type JsonValue } from './types.ts'
+
+/** The encoder lives with the cursor logic; this module only names it once, never re-implements it. */
+export { encode } from './continuation.ts'
 
 /** A document is not a graph: past this depth a value is unreadable, so its key is dropped. */
 const MAX_DEPTH = 256
@@ -137,28 +146,18 @@ function failure(
   }
 }
 
-const PREFIX = 'ops-next-v1:'
-const MAX_TOKEN_BYTES = 8192
-
 /**
  * Where an incomplete observation may be continued from — expressed as a token because the frozen
- * `Outcome` type stores one, and a token is data, never authority: it names a read-only retrieval,
- * it never authorises replaying an operation.
+ * `Outcome` type stores one. The cursor logic lives in `continuation.ts`, which owns the encoder and
+ * consults the observation itself: a `read` page is named by `details.meta.truncation.nextOffset`
+ * and a `grep` file page by `details.fileLimitReached`, and every other shape answers `undefined`
+ * because "we stopped early" is not the claim "here is the rest".
  *
- * Nothing is paginatable today. Round 1's facts carry `coverage` — counts and a truncation cause —
- * but no cursor, so there is no fact from which the next page's start could be proven. Fabricating
- * one would turn "we stopped early" into "here is the rest", which is the exact lie the honesty
- * rules exist to prevent. Each tool becomes paginatable when the rules publish:
- *   - `grep`:  the next file offset of the scan (today only `coverage.scannedFiles` exists), since a
- *              scan stops between files, not inside one.
- *   - `read`:  the next line offset of the truncated file (today only `truncatedBy: 'output-budget'`
- *              exists), since the body that was withheld is a line range.
- * Until then every tool answers `undefined`, and a `partial` fact surfaces as the kernel's
- * "incomplete and has no safe continuation" failure instead of a page.
+ * This positional form is the shape the barrel and existing callers speak, but it carries no
+ * `details`, so it can never prove a cursor and always answers `undefined`. `toOutcome` calls the
+ * observation-aware form directly; a caller holding an observation must do the same.
  */
-export function continuationFor(_tool: string, _args: unknown, _facts: OutcomeFacts): string | undefined {
-  return undefined
-}
+export const continuationFor = continuationForTool
 
 /**
  * Reads a token produced by `continuationFor` without trusting a byte of it: any prefix, size,
@@ -201,7 +200,7 @@ export function toOutcome(o: ToolObservation): Outcome<CanonicalData> {
     if (facts.status === 'completed' || facts.status === 'partial') {
       // `partial` needs recordable coverage and a continuation, because the type says both exist.
       if (coverage !== undefined) {
-        const continuation = continuationFor(o.tool, o.args, facts)
+        const continuation = continuationFromObservation(o, facts)
         if (continuation !== undefined) {
           return { status: 'partial', data, coverage: { ...coverage, isComplete: false as const }, continuation }
         }
