@@ -1,4 +1,6 @@
 /** STUB — replaced by slice dedup/coordinator */
-export function createDedup(): undefined {
-  return undefined
+import type { Transform } from '../pipeline.ts'
+
+export function createDedup(): Transform {
+  return { name: 'dedup/read', features: ['dedup'], apply() {} }
 }

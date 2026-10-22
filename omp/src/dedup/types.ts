@@ -38,3 +38,17 @@ export interface DedupTarget {
 export interface Rewrite {
   readonly text: string
 }
+
+/**
+ * Per-agent record of bodies already in the model's context. Bounded on three axes so a long
+ * session cannot grow without limit: agents, records, and total body bytes.
+ */
+export interface DedupStore {
+  remember(record: ReadRecord): void
+  lookup(agentKey: string, epoch: number, key: string): ReadRecord | undefined
+  /** Drop every record for one agent. Called whenever a non-harmless tool result lands. */
+  forget(agentKey: string): void
+  size(): number
+  bytes(): number
+  dispose(): void
+}

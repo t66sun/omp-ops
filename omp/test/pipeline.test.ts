@@ -114,10 +114,10 @@ test('observe maps the host payload onto our field names and freezes the copy', 
 test('the real barrels register the rules then the renderer, in that order', async () => {
   const { registeredTransforms } = await import('../src/pipeline.ts')
   await import('../src/extension/index.ts')
-  const owned = new Set(['rules/bash', 'rules/file', 'rules/search', 'rules/eval', 'honesty/render'])
+  const owned = new Set(['rules/bash', 'rules/file', 'rules/search', 'rules/eval', 'honesty/render', 'dedup/read'])
   assert.deepEqual(
     registeredTransforms().map((t) => t.name).filter((n) => owned.has(n)),
-    ['rules/bash', 'rules/file', 'rules/search', 'rules/eval', 'honesty/render'],
+    ['rules/bash', 'rules/file', 'rules/search', 'rules/eval', 'honesty/render', 'dedup/read'],
   )
   const out = { content: [{ type: 'text', text: 'untouched' }], details: { totalLines: 1 }, isError: false }
   const snapshot = JSON.stringify(out)
