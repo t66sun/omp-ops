@@ -66,6 +66,9 @@
 - `omp/` needs no build step and no Bun CLI: omp loads its `.ts` sources directly, and its tests run
   on Node's native type stripping — `node --test "omp/test/*.test.ts"`. **Quote the glob**: on Node 24
   the bare form resolves the directory and fails with `Cannot find module ...\omp\test`.
+- `node scripts/round-gate.mjs` is the whole round in one command: file size, unit tests, no
+  surviving slice stubs, no empty `apply`, slice disjointness, and the live session. `--no-live`
+  skips the session step where `omp` is not installed.
 - `node scripts/check-slices.mjs` proves the parallel-slice invariant: no two PR-numbered commits
   touch the same file outside the frozen contracts, and every unnumbered commit that does is printed.
 - `node omp/scripts/smoke.mjs` is the live gate: it starts real `omp -p` sessions with the extension
