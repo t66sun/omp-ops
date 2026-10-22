@@ -68,6 +68,36 @@ const scenarios = {
     return problems
   },
 
+  /** A failed file operation must say what it proves, not just that it failed. */
+  file(events) {
+    const failed = executions(events).filter((e) => e.isError && ['read', 'edit', 'write'].includes(e.tool))
+    if (failed.length === 0) return ['the model never attempted a file operation on a missing path']
+    const last = failed.at(-1)
+    const facts = last.details['outcome.v1']
+    if (!facts) return [`details["outcome.v1"] is missing on the failed ${last.tool}`]
+    const problems = []
+    if (facts.code !== 'NOT_FOUND') problems.push(`code is ${JSON.stringify(facts.code)}, expected "NOT_FOUND"`)
+    if (facts.effectState !== 'none') problems.push(`effectState is ${JSON.stringify(facts.effectState)}, expected "none"`)
+    if (!/\[outcome: error · effect none · retry after-input-change\]/.test(last.content)) {
+      problems.push(`content has no outcome line: ${JSON.stringify(last.content.slice(-200))}`)
+    }
+    return problems
+  },
+
+  /** A dead kernel must never be reported as a clean run. */
+  eval(events) {
+    const ran = executions(events).filter((e) => e.tool === 'eval')
+    if (ran.length === 0) return ['the model never used eval']
+    const last = ran.at(-1)
+    const facts = last.details['outcome.v1']
+    if (!facts) return ['details["outcome.v1"] is missing on the eval result']
+    const problems = []
+    if (facts.code !== 'RESULT_UNKNOWN') problems.push(`code is ${JSON.stringify(facts.code)}, expected "RESULT_UNKNOWN"`)
+    if (facts.effectState !== 'unknown') problems.push(`effectState is ${JSON.stringify(facts.effectState)}, expected "unknown"`)
+    if (facts.retry !== 'never') problems.push(`retry is ${JSON.stringify(facts.retry)}, expected "never"`)
+    return problems
+  },
+
   /** Reading the same unchanged file twice must not re-send the body. */
   dedup(events) {
     const body = Array.from({ length: 40 }, (_, i) => `${i + 1} | line ${i + 1} of the fixture`).join('\n')
@@ -84,6 +114,8 @@ const scenarios = {
 }
 
 const prompts = {
+  eval: 'Use the eval tool with language js to run process.exit(3) and nothing else. Then reply DONE.',
+  file: 'Use the edit tool to replace the text alpha with beta in missing.txt. Do not create the file. Then reply DONE.',
   honesty: 'Use the bash tool to run exactly this command: false    Then reply DONE.',
   dedup: 'Read data.txt, then read data.txt a second time. Do not use any other tool. Then reply DONE.',
 }
