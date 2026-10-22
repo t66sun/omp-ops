@@ -336,7 +336,7 @@ test('record and count refuse what is not data', () => {
   }
 })
 
-test('the barrel exposes the projection and the sibling stubs', async () => {
+test('the barrel exposes every part of the PTC surface', async () => {
   assert.equal(barrel.toOutcome, toOutcome)
   assert.equal(barrel.continuationFor, continuationFor)
   assert.equal(barrel.decodeContinuation, decodeContinuation)
@@ -346,6 +346,12 @@ test('the barrel exposes the projection and the sibling stubs', async () => {
     retry: 'never',
     message: 'stopped early',
   }), undefined)
-  assert.deepEqual(barrel.createOps(async () => undefined).read, undefined)
+  // The JS helper is a `%load`-able script, not a module: it has no `export`, so it cannot be a barrel
+  // export. What the barrel hands out instead is its path and the loader that reaches it.
+  assert.match(barrel.OPS_JS_PATH, /ptc[\\/]js[\\/]ops\.mjs$/)
+  assert.match(barrel.OPS_PY_PATH, /ptc[\\/]py[\\/]ops\.py$/)
+  assert.equal(typeof barrel.createHint, 'function')
+  assert.equal(typeof barrel.attachOps, 'function')
+  assert.equal(typeof barrel.resetOpsAttachment, 'function')
   assert.equal(await barrel.installPrelude(undefined), 'none')
 })

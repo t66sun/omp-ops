@@ -11,5 +11,6 @@ export { record, count } from './types.ts'
 export type { JsonValue, CanonicalData, Invoke, Ops, OpsTool } from './types.ts'
 
 export * from './continuation.ts'
-export * from './js/ops.ts'
+export * from './hint.ts'
+export * from './install.ts'
 export * from './prelude.ts'

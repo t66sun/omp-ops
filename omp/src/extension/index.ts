@@ -13,6 +13,7 @@ import {
 import '../rules/index.ts'
 import '../render/index.ts'
 import '../dedup/index.ts'
+import { attachOps } from '../ptc/install.ts'
 
 /**
  * The slice of the omp extension API this factory uses. The host passes the API object itself as the
@@ -30,6 +31,7 @@ export interface ExtensionApi {
 export default function ompOps(pi: ExtensionApi): void {
   pi.on('tool_result', handleToolResult)
   attachTransforms(pi)
+  void attachOps(pi)
 }
 
 function handleToolResult(payload: unknown, ctx?: TransformContext): unknown {

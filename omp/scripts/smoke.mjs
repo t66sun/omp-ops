@@ -68,6 +68,23 @@ const scenarios = {
     return problems
   },
 
+  /**
+   * A caller that reaches for the SDK before loading it must be told how to load it. This is the one
+   * capability a model cannot discover by trial: `%load` is a host channel, not a tool.
+   */
+  ptc(events) {
+    const cells = executions(events).filter((e) => e.tool === 'eval')
+    if (cells.length === 0) return ['the model never used eval']
+    const hinted = cells.filter((e) => e.content.includes('%load'))
+    if (hinted.length === 0) {
+      return [`no eval cell carried the load hint; last cell: ${JSON.stringify(cells.at(-1).content.slice(-300))}`]
+    }
+    const line = hinted[0].content.split('\n').find((l) => l.includes('%load'))
+    if (!/%load "[^"]+ops\.mjs"/.test(line ?? '')) return [`the hint does not name the JS helper: ${JSON.stringify(line)}`]
+    if (!/%load "[^"]+ops\.py"/.test(line ?? '')) return [`the hint does not name the Python helper: ${JSON.stringify(line)}`]
+    return []
+  },
+
   /** A failed file operation must say what it proves, not just that it failed. */
   file(events) {
     const failed = executions(events).filter((e) => e.isError && ['read', 'edit', 'write'].includes(e.tool))
@@ -118,6 +135,7 @@ const prompts = {
   file: 'Use the edit tool to replace the text alpha with beta in missing.txt. Do not create the file. Then reply DONE.',
   honesty: 'Use the bash tool to run exactly this command: false    Then reply DONE.',
   dedup: 'Read data.txt, then read data.txt a second time. Do not use any other tool. Then reply DONE.',
+  ptc: 'Use the eval tool with language py to run exactly this code and nothing else: await ops.read({"path": "x"})    Do not load anything first. Then reply DONE.',
 }
 
 const files = { 'data.txt': Array.from({ length: 40 }, (_, i) => `${i + 1} | line ${i + 1} of the fixture`).join('\n') }
