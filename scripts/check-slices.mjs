@@ -20,6 +20,16 @@ import { execFileSync } from 'node:child_process'
 const SINCE = process.argv[2]
 
 /**
+ * Commits that pre-created stubs for a whole round, declared rather than inferred. `#14` is the PTC
+ * spine: like the Round 0 spine it created one stub per slice so the siblings never raced on a barrel,
+ * which means it legitimately appears as an earlier owner of every PTC file.
+ */
+const SPINE_COMMITS = new Set(['396e56c'])
+
+/** Generated files are not source, so they can never be a slice's exclusive property. */
+const GENERATED = [/__pycache__\//, /\.pyc$/, /\.tsbuildinfo$/]
+
+/**
  * The frozen interface files (restructuringPLAN.md §5.2). A slice may edit them
  * only to record a contract amendment, which is why they are exempt from the
  * disjointness rule rather than from review.
@@ -44,6 +54,7 @@ function git(args) {
 }
 
 function inFreezeZone(path) {
+  if (GENERATED.some((pattern) => pattern.test(path))) return true
   return FREEZE_ZONE.some((entry) => (entry.endsWith('/') ? path.startsWith(entry) : path === entry))
 }
 
@@ -56,10 +67,13 @@ const commits = git(['log', '--format=%H%x1f%s', ...range, '--', 'omp/'])
     return { sha, subject }
   })
 
-// `git log` lists newest first, so the last entry is the commit that introduced `omp/`.
-const spine = commits.at(-1)
-const slices = commits.filter((c) => c !== spine && /\(#\d+\)$/.test(c.subject))
-const amendments = commits.filter((c) => c !== spine && !/\(#\d+\)$/.test(c.subject))
+function isSpine(commit) {
+  // `git log` lists newest first, so the last entry is the commit that introduced `omp/`.
+  return commit === commits.at(-1) || [...SPINE_COMMITS].some((sha) => commit.sha.startsWith(sha))
+}
+
+const slices = commits.filter((c) => !isSpine(c) && /\(#\d+\)$/.test(c.subject))
+const amendments = commits.filter((c) => !isSpine(c) && !/\(#\d+\)$/.test(c.subject))
 
 function filesOf(commit) {
   return git(['show', '--name-only', '--format=', commit.sha, '--', 'omp/']).split('\n').filter(Boolean)
