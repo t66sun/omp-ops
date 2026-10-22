@@ -315,7 +315,11 @@ barrel 与其中的空实现由 Round 0 一并创建，后续切片只填自己�
 | 2 | `dedup/target-read` | ✅ #8 `f3c4b03` |
 | 2 | `dedup/target-grep` | ✅ #4 `42c9cbf` |
 | 3 | `ptc/outcome` | ✅ #14 `396e56c` |
-| 3 | `ptc/continuation`、`ptc/js`、`ptc/py`、`ptc/prelude` | ⏳ 进行中 |
+| 3 | `ptc/py` | ✅ #16 `a24c9d1` |
+| 3 | `ptc/continuation` | ✅ #17 `de8b639` |
+| 3 | `ptc/js` | ✅ #18 `3469ac6` |
+| 3 | `ptc/prelude` | ✅ #19 `3013fe2` |
+| 3 | 接线（我做的整合改动，非切片） | ✅ `2a1f949` |
 
 #### Round 0 · 契约地基（串行，2 个 PR）
 
@@ -381,7 +385,7 @@ epoch 在每次 `session_before_compact` / `session_compact` 与任何上下文�
 |---|---|---|---|---|
 | `ptc/outcome` | 工具结果 → Outcome | `omp/src/ptc/outcome.ts` | R0 | 缺回执 → `RESULT_UNKNOWN`；未识别状态 → unknown；不完整且无安全游标 → 带数据的错误 |
 | `ptc/continuation` | 分页 / 续跑规则 | `omp/src/ptc/continuation.ts` | R0 | 未完成扫描必须给 `partial` + `continuation`，且**不得**出现 `matchedTotal` |
-| `ptc/js` | JS helper `ops` | `omp/src/ptc/js/ops.ts` | R0 | `await ops.grep({...})` 返回 Outcome；底层仍走 `tool.grep` |
+| `ptc/js` | JS helper `ops` | `omp/src/ptc/js/ops.mjs` | R0 | `await ops.grep({...})` 返回 Outcome；底层仍走 `tool.grep` |
 | `ptc/py` | Python helper `ops` | `omp/src/ptc/py/ops.py` | R0 | 与 JS 版字段逐一对齐；分页语义一致 |
 | `ptc/prelude` | 注册 / 发现 / 降级 | `omp/src/ptc/prelude.ts` | R0 | prelude 不可用时自动降级为 `%load` 文件方案并给出提示 |
 
@@ -466,7 +470,7 @@ graph LR
 | H2 | `read` 在 `execute` 阶段记录 seen lines，晚于它的 `content` 改写不影响 `edit.enforceSeenLines` | ✅ 已实测 | 去重与编辑安全冲突，需改为「只在无编辑意图时去重」 |
 | H3 | `details.displayContent` 与 `content` 分离，改 `content` 不影响 TUI 渲染 | ✅ 结构已确认，视觉待 0b 确认 | 去重会让人类看不到内容，须放弃或加 UI 开关 |
 | H4 | 扩展能从 `tool_result` 拿到 `details` 并附加 `details.outcome` 而不被后续处理器覆盖 | ✅ 已实测 | 诚实协议只能走 `additionalContext`，Round 3 的 typed 消费端失效 |
-| H5 | `eval` 能注入 `ops` 全局（extension prelude）或至少 `%load` 一个 helper 文件 | 待验证 | Round 3 退化为纯 helper 文件方案（可接受，但文档与入口需改） |
+| H5 | `eval` 能注入 `ops` 全局（extension prelude）或至少 `%load` 一个 helper 文件 | ✅ 已实测（结论反转，见 §5.4.4） | 无 prelude 注册面；`%load` 可用但拒绝含 `export` 的文件，helper 必须是脚本 |
 | H6 | marketplace 安装会执行插件自身的 `bun install`（即带原生依赖的插件可走 marketplace） | 待验证 | 只能走 `omp plugin install <npm\|git>`；marketplace 仅适合零依赖插件，Round 6 的发布形态要改 |
 | H7 | 安装期 `#validateInstalledExtensions` 容忍 factory 里注册事件处理器（不视为初始化失败） | ✅ 已实测 | 注册必须推迟到 `session_start`，Round 0 的装配方式与测试方式都要改 |
 
@@ -522,6 +526,34 @@ graph LR
 | `grep` 2000 上限 | 300 文件 × 10 匹配：首页 `matchCount:200, fileCount:20, truncated:true`；`skip:199` → 1 文件；`skip:200` → `matchCount:0, fileCount:0, truncated:false`，而 `f200..f299` 存在且匹配 | **宿主缺陷**：内部 `maxCount:2000` 静默截断。`matchCount` 永远到不了 2000（单页上限 20 文件 × 20 匹配 = 200）。唯一可靠的推论是「**分页调用永不称完整**」——已写成规则：`skip > 0` ⇒ `partial` + `truncatedBy:'row-limit'` |
 | `eval` 失败 | `details = {language, languages, cells:[{code, language, output, status, exitCode?, durationMs}], isError?}` | 超时**没有 `exitCode`**，只有 `durationMs` 与 `[eval cell timed out …]`；JS worker 退出是 `Error: JS eval worker exited with code N`；内核被杀是 `[Kernel died during execution; completion is uncertain…]` |
 | 被拒调用 | 被拒的调用**根本不产生 `tool_result`**（只有 `tool_execution_start/end` + `tool_approval_resolved`） | `denied` 事实只能在 `tool_execution_end` 路径上生成，`tool_result` 路径永远看不到拒绝 |
+
+#### 5.4.4 Round 3 的结论：PTC 只能「加载」，不能「注入」
+
+H5 的答案是**否定**，且否定得很彻底：
+
+1. omp 18.12.6 没有面向扩展的 eval prelude 注册面。`grep -a` 打在 `omp.exe` 上：prelude 只在 `createAgentSession` 内部由四个内建定义组装（`ft.getEvalPreludes = Jh`，每个都由一个 settings 句柄门控），`PreludeDefinition` 由宿主构造；字符串 `registerEval` 在二进制里**一次都没出现**。
+2. 活探针里 API 没有任何匹配 `/prelude/i` 的成员（只有 `on`、`registerTool/Command/Shortcut/Flag/MessageRenderer/ComposerShape/Provider`、`registerFileWrite/DeleteFallback`、`setLabel` 与消息/会话方法），而 `pi.pi` 只导出 `createBrowserPrelude`/`createComputerPrelude` 这类工厂。单元里打印 `PROBE1 undefined object`——`ops` 不存在，宿主自己的 `browser` 却在。
+3. 唯一通道是 `%load "<绝对路径>"`，两种语言都实测可用；但它**拒绝任何包含 `export` 的文件**：
+
+```
+%load "…/ops.mjs"  →  SyntaxError: Unexpected keyword 'export' at <parse>
+```
+
+   去掉所有 `export` 的 `.mjs` 能正常加载，且顶层声明会活到内核里。所以 JS helper 的形态不是 ESM 模块，而是**脚本 + 一行发布**：
+
+```js
+globalThis.createOps = createOps
+```
+
+   这行是加载契约，不是装饰：顶层的 `function` 声明否则只活在被加载的那一段里、到不了内核。Python 版的 `%load` 直接可用（`type(create_ops).__name__` → `"function"`）。
+
+由此产生三条实现后果，都已落地（`2a1f949`，我做的整合改动，不属于任何切片）：
+
+- **`ptc/js/ops.ts` 被删除**。它是个永远无法被 `import` 的桩：真正的 helper 只能由 `%load` 送进内核。barrel 改为导出 helper 的**路径**（`OPS_JS_PATH`/`OPS_PY_PATH`），而不是一个假的函数。
+- **提示只随失败出现**（`ptc/hint.ts`）。模型第一次写 `await ops.read({…})` 会拿到 `NameError`/`ReferenceError`；这条 transform 识别「失败 + eval + 文本提到 `ops`/`createOps`/`create_ops` + 还没出现过 `%load`」，在最后一个文本块后追加一行同时给出两种语言的绝对路径。会话里从不用 eval 就一分钱不花，用过一次就不再念。`ptc/hint` 是 renderer 之外唯一写 `content` 的 transform，顺序固定（rules → render → dedup → hint），且自身幂等。
+- **注册是滞后的**（`ptc/install.ts`）。`installPrelude` 是异步的，先注册就得猜通道；等它给出 `'load-file'` 再注册，意味着未来真出现 prelude 注册面时提示根本不会注册——那时 `ops` 已经装好了，提示就成了假话。
+
+实门禁已覆盖：`node omp/scripts/smoke.mjs ptc` 在一个真实会话里拿到同时含 `ops.mjs` 与 `ops.py` 绝对路径的 `%load` 行。
 
 ### 5.5 PR 契约（每个切片都必须满足）
 
@@ -620,7 +652,7 @@ Round 3 在 eval 里分页取一个不完整扫描；Round 5 用带引号换行�
 | R1 | omp 扩展**无隔离**，中间件异常会拆掉会话 | 致命 | 每个处理器全包 try/catch 并直通；提供 `dedup.enabled` / `honesty.enabled` 开关；异常计数超阈值自动停用 |
 | R2 | `tool_result` 是链式中间件，可能与其它扩展互相踩 | 内容错乱 | 只做单调「变短」；不碰 `isError`、`displayContent`、`truncation`；打 `details.outcome.v1` 幂等标记 |
 | R3 | omp 版本漂移（`details` 形状、事件名、prelude 机制） | 静默失效 | 契约测试钉住所用字段；字段缺失即降级直通并记一次 warning，绝不抛错 |
-| R4 | prelude 注入面不稳定 | Round 3 入口受限 | 以 `%load` 文件为第一形态，prelude 为可选增强 |
+| R4 | prelude 注入面不稳定 | Round 3 入口受限 | 已确认无注册面：以 `%load` 文件为唯一形态，粘贴提示只在失败时出现 |
 | R5 | 许可与归属 | 发布受阻 | dsh-ops 为 MIT；Round 6 前确认 omp 侧许可，保留 `PROVENANCE` 记录（现有 `licenses/` 已含 deepseek-harness 的 MIT 全文可作范式） |
 | R6 | 双语文档规则（`AGENTS.md`） | 门禁失败 | 文档毕业进 `docs/` 时中英同 PR |
 | R7 | 去重让模型误以为文件未变 | 正确性 | 引用行必须携带 revision 与 `[path#TAG]`；任何写操作立即 epoch++ 失效；只在 body 逐字节相同且文件 identity 完全吻合时生效 |
