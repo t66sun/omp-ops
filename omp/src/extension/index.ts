@@ -1,9 +1,11 @@
 import { observe, type ToolObservation } from '../host/contracts.ts'
 import {
+  attachTransforms,
   registeredTransforms,
   runTransforms,
   type FeatureFlag,
   type MutableResult,
+  type TransformContext,
 } from '../pipeline.ts'
 // Registration side effects: `rules/index.ts` registers every rule transform, `render/index.ts`
 // registers the outcome renderer that runs after them, and the dedup barrel hands the coordinator
@@ -27,13 +29,14 @@ export interface ExtensionApi {
  */
 export default function ompOps(pi: ExtensionApi): void {
   pi.on('tool_result', handleToolResult)
+  attachTransforms(pi)
 }
 
-function handleToolResult(payload: unknown): unknown {
+function handleToolResult(payload: unknown, ctx?: TransformContext): unknown {
   const o = observe(payload)
   if (o === undefined) return undefined
   const out: MutableResult = { content: [...o.content], details: o.details, isError: o.isError }
-  runTransforms(o, out, enabledFeatures())
+  runTransforms(o, out, enabledFeatures(), ctx)
   return changed(o, out) ? { content: out.content, details: out.details, isError: out.isError } : undefined
 }
 

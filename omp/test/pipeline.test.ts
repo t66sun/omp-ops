@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { observe, type ToolObservation } from '../src/host/contracts.ts'
 import {
+  attachTransforms,
   registerTransform,
   registeredTransforms,
   runTransforms,
@@ -126,4 +127,42 @@ test('the real barrels register the rules then the renderer, in that order', asy
     t.apply({ tool: 'read', args: {}, content: [], details: {}, isError: false }, out)
   }
   assert.equal(JSON.stringify(out), snapshot, 'every Round 0 transform must be inert')
+})
+
+test('the host context reaches every transform that asks for it', () => {
+  const seen: unknown[] = []
+  registerTransform({
+    name: 'ctx/probe',
+    features: ['honesty'],
+    apply(_o, _out, ctx) {
+      seen.push(ctx)
+    },
+  })
+  const ctx = { agent: { id: 'a1' } }
+  runTransforms(
+    { tool: 'read', args: {}, content: [], details: {}, isError: false },
+    { content: [], details: {}, isError: false },
+    ['honesty'],
+    ctx,
+  )
+  assert.equal(seen.length, 1, 'apply must receive the context')
+  assert.equal(seen[0], ctx, 'the same object must arrive, not a copy')
+})
+
+test('attach runs once per transform and a throwing attach is recorded, not fatal', () => {
+  let attached = 0
+  const host = { on() {} }
+  registerTransform({ name: 'attach/good', features: ['honesty'], apply() {}, attach: () => { attached += 1 } })
+  registerTransform({
+    name: 'attach/bad',
+    features: ['honesty'],
+    apply() {},
+    attach() {
+      throw new Error('boom')
+    },
+  })
+  attachTransforms(host)
+  assert.equal(attached, 1, 'attach must be called exactly once')
+  assert.ok(transformFailures().includes('attach/bad'), 'a throwing attach must be recorded')
+  assert.ok(!transformFailures().includes('attach/good'))
 })
