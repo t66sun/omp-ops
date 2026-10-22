@@ -121,29 +121,20 @@ test('a payload without a call id observes as undefined callId rather than an em
 
 const OWED = new Set(['rules/bash', 'rules/file', 'rules/search', 'rules/eval', 'honesty/render', 'dedup/read'])
 
-test('the base entry owns no feature transform', async () => {
+test('the entry registers every rule, then the renderer, then the dedup coordinator', async () => {
   const { registeredTransforms } = await import('../src/pipeline.ts')
-  // `pkg[]` loads exactly this file, so an empty result here is the promise that a stripped install is inert.
   await import('../src/extension/index.ts')
-  assert.deepEqual(registeredTransforms().map((t) => t.name).filter((n) => OWED.has(n)), [])
-})
-
-test('the feature entries register the rules, then the renderer, then dedup', async () => {
-  const { registeredTransforms } = await import('../src/pipeline.ts')
-  await import('../src/extension/honesty.ts')
-  await import('../src/extension/dedup.ts')
-  const owned = OWED
   assert.deepEqual(
-    registeredTransforms().map((t) => t.name).filter((n) => owned.has(n)),
+    registeredTransforms().map((t) => t.name).filter((n) => OWED.has(n)),
     ['rules/bash', 'rules/file', 'rules/search', 'rules/eval', 'honesty/render', 'dedup/read'],
   )
   const out = { content: [{ type: 'text', text: 'untouched' }], details: { totalLines: 1 }, isError: false }
   const snapshot = JSON.stringify(out)
   for (const t of registeredTransforms()) {
-    if (!owned.has(t.name)) continue
+    if (!OWED.has(t.name)) continue
     t.apply({ tool: 'read', args: {}, content: [], details: {}, isError: false }, out)
   }
-  assert.equal(JSON.stringify(out), snapshot, 'every Round 0 transform must be inert')
+  assert.equal(JSON.stringify(out), snapshot, 'no transform may act on an observation that carries no facts')
 })
 
 test('the host context reaches every transform that asks for it', () => {

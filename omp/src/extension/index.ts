@@ -1,12 +1,30 @@
 /**
- * The base entry, and the only entry a host without feature support ever loads.
+ * The single extension entry, and the only file omp loads.
  *
- * It registers nothing and changes nothing. That is the point: omp's install-time feature bracket is a
- * *file selector*, not a runtime switch — `pkg[]` decides which modules load and nothing about the
- * bracket reaches extension code — so the honest way to make a stripped install free is for the base
- * entry to be empty and for each feature to live in its own file.
+ * Two host facts decided this shape, both measured rather than assumed:
  *
- * A host that loads only this file therefore gets a valid plugin that does nothing, rather than a
- * handler that silently guards every tool result.
+ * 1. Each extension entry gets its own module graph, so two entries cannot share a transform registry.
+ * 2. A marketplace install loads `omp.extensions` and nothing else — `omp.features` selects *files* for
+ *    an npm/link install, but the marketplace path never reads it, so a feature entry is unreachable
+ *    there. Splitting the features into entries would ship a plugin that loads and does nothing.
+ *
+ * So: one entry, one `tool_result` handler, and every feature's transforms registered in this graph by
+ * the imports below. Import order is run order — rules publish facts, the renderer writes the line, the
+ * dedup coordinator and the PTC hint come after.
  */
-export default function ompOps(): void {}
+import { createHandler } from './handler.ts'
+import { attachTransforms } from '../pipeline.ts'
+import '../rules/index.ts'
+import '../render/index.ts'
+import '../dedup/index.ts'
+import { attachOps } from '../ptc/index.ts'
+
+export interface ExtensionApi {
+  on(event: string, handler: (payload: unknown) => unknown): void
+}
+
+export default function ompOps(pi: ExtensionApi): void {
+  pi.on('tool_result', createHandler(['honesty', 'dedup', 'ptc']))
+  attachTransforms(pi)
+  void attachOps(pi)
+}
