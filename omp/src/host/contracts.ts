@@ -10,6 +10,11 @@ export interface ToolObservation {
   readonly content: readonly unknown[]
   readonly details: unknown
   readonly isError: boolean
+  /**
+   * The host's id for this call, when it supplied one. omp has no message id, so a consumer that
+   * needs to name where a body already lives names the call and nothing else.
+   */
+  readonly callId?: string
 }
 
 /**
@@ -19,13 +24,21 @@ export interface ToolObservation {
  */
 export function observe(raw: unknown): ToolObservation | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
-  const candidate = raw as { toolName?: unknown; input?: unknown; content?: unknown; details?: unknown; isError?: unknown }
-  const { toolName, input, content, details, isError } = candidate
+  const candidate = raw as {
+    toolName?: unknown
+    toolCallId?: unknown
+    input?: unknown
+    content?: unknown
+    details?: unknown
+    isError?: unknown
+  }
+  const { toolName, toolCallId, input, content, details, isError } = candidate
   if (typeof toolName !== 'string') return undefined
   if (!Array.isArray(content)) return undefined
   if (typeof isError !== 'boolean') return undefined
   const body: readonly unknown[] = Object.freeze([...content])
-  return Object.freeze({ tool: toolName, args: input, content: body, details, isError })
+  const callId = typeof toolCallId === 'string' && toolCallId.length > 0 ? toolCallId : undefined
+  return Object.freeze({ tool: toolName, args: input, content: body, details, isError, callId })
 }
 
 /**

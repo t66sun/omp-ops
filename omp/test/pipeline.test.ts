@@ -104,12 +104,19 @@ test('observe maps the host payload onto our field names and freezes the copy', 
     content: [{ type: 'text', text: 'body' }],
     details: { totalLines: 9 },
     isError: false,
+    callId: 'call_00_probe',
   })
   assert.equal(Object.isFrozen(o), true)
   assert.equal(Object.isFrozen(o?.content), true)
 
   raw.content.push({ type: 'text', text: 'extra' })
   assert.equal(o?.content.length, 1)
+})
+
+test('a payload without a call id observes as undefined callId rather than an empty string', () => {
+  const base = { type: 'tool_result', toolName: 'read', input: {}, content: [], details: {}, isError: false }
+  assert.equal(observe(base)?.callId, undefined)
+  assert.equal(observe({ ...base, toolCallId: '' })?.callId, undefined, 'an empty id names nothing')
 })
 
 test('the real barrels register the rules then the renderer, in that order', async () => {
