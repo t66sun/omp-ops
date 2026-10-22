@@ -404,7 +404,26 @@ epoch 在每次 `session_before_compact` / `session_compact` 与任何上下文�
 |---|---|---|---|
 | `release/manifest` | `package.json#omp` + feature bracket + 开关 | `omp/package.json`、`omp/src/extension/flags.ts` | `pkg[honesty]` 只启用诚实协议；`pkg[]` 全关时零副作用 |
 | `release/docs` | 双语文档 + CHANGELOG | `docs/porting/*.md`、`docs/porting/*.zh.md` | 中英同 PR，内容一致 |
-| `release/gate` | 发布门禁 | `scripts/check-omp.mjs` | 干净机器 `omp plugin install <spec>` 后工具可用 |
+| `release/gate` | 发布门禁 | `scripts/check-omp.mjs` | 干净机器装完后开一个真会话，工具全部可用 |
+
+**发布形态已定：走 marketplace 的 `git-subdir` 源，不走 `omp plugin install <git-url>`。**
+理由是结构性的，不是偏好：本仓库是 monorepo，插件在 `omp/` 子目录，而 `omp plugin install <git-spec>`
+把**仓库根**当包根（根上的 `package.json` 是 dsh-ops 本体，清单里的 `extensions` 根本不在根上）。
+omp 的 catalog 规范里恰好为此留了 `git-subdir`：
+
+```json
+{"name":"omp-ops",
+ "source":{"source":"git-subdir","url":"https://github.com/t66sun/omp-ops.git","path":"omp","ref":"main"}}
+```
+
+配套的两条硬约束：
+
+1. **`omp/` 必须保持零依赖。** marketplace 安装只做「缓存 + 符号链接进 `<scope>/plugins/node_modules`」，
+   文档里**没有**插件自身依赖的安装步骤（对照：`omp plugin install <npm|git>` 会在 `~/.omp/plugins` 里跑一次
+   `bun install`，那才是原生叶子包的正规通道）。所以 R4 的**路线 B（自带 napi 插件）与 marketplace 互斥**：
+   一旦 `omp/` 需要原生依赖，发布形态必须整体切到 `omp plugin install`，同时 monorepo 也必须拆出独立包根。
+2. 版本解析顺序是 catalog `version` → `.claude-plugin/plugin.json` → 根 `plugin.json` → `package.json` → 源 SHA 前七位 → `0.0.0`。
+   我们只填 `omp/package.json#version`，其余不建，避免两处版本号打架。
 
 #### 汇总：并行度、可发布性与依赖
 
