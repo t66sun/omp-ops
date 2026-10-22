@@ -12,7 +12,7 @@
  *   6. live     does a real omp session see the result? (needs `omp` on PATH)
  *
  *   node scripts/round-gate.mjs            # everything
- *   node scripts/round-gate.mjs --no-live  # skip step 6 on a machine without omp
+ *   node scripts/round-gate.mjs --no-live  # skip the live step on a machine without omp
  */
 import { execFileSync } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -32,6 +32,7 @@ function run(name, command, args) {
 }
 
 run('size', 'node', ['scripts/check-file-size.mjs'])
+run('plugin', 'node', ['scripts/check-omp.mjs'])
 run('unit', 'node', ['--test', 'omp/test/*.test.ts'])
 run('slices', 'node', ['scripts/check-slices.mjs'])
 
