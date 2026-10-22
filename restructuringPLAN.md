@@ -268,12 +268,20 @@ export interface Rewrite { readonly text: string }   // 只在严格短于原正
 
 | PR | 切片 | 独占文件 | 依赖 | 规模 |
 |---|---|---|---|---|
-| `contract/spine` (0a) | `omp/` 包骨架 + kernel 三件套 + host 契约类型 + pipeline + dedup 类型 + 空 barrel + 最小 extension factory | `omp/package.json`、`omp/tsconfig.json`、`omp/src/kernel/**`、`omp/src/host/contracts.ts`、`omp/src/pipeline.ts`、`omp/src/dedup/types.ts`、`omp/src/{rules,dedup,ptc}/index.ts`、`omp/src/extension/index.ts` | 无 | ~450 行 |
-| `contract/runtime` (0b) | `observe()` 与三个 facts 提取器的运行时守卫、`runTransforms` 执行器、kernel 规格测试、七条假设探针 | `omp/src/host/guards.ts`、`omp/src/pipeline-runtime.ts`、`omp/test/**`、`docs/porting/spike-report.md` | 0a | ~400 行 |
+| `contract/spine` (0a) | `omp/` 包骨架、kernel 三件套（`outcome`/`errors`/`coverage`）、host 契约类型与 `observe()`、pipeline 执行器、dedup 类型、`rules`/`dedup` 两个 barrel 及其空实现桩、最小 extension factory、0a 自身单测 | `omp/package.json`、`omp/tsconfig.json`、`omp/src/kernel/**`、`omp/src/host/contracts.ts`、`omp/src/pipeline.ts`、`omp/src/dedup/types.ts`、`omp/src/rules/**`、`omp/src/dedup/**`、`omp/src/render/outcome-line.ts`、`omp/src/extension/index.ts`、`omp/test/pipeline.test.ts`、`omp/test/kernel.test.ts` | 无 | ~550 行 |
+| `contract/runtime` (0b) | `bashFacts`/`readFacts`/`grepFacts` 运行时守卫、kernel 全表规格移植测试、七条假设探针 | `omp/src/host/guards.ts`、`omp/test/guards.test.ts`、`omp/test/kernel-spec.test.ts`、`docs/porting/spike-report.md` | 0a | ~400 行 |
 
-验收（0a）：`node --test` 绿；`omp plugin link` 装载后**什么都不做**。
+验收（0a）：`node --test omp/test/*.test.ts` 绿；`omp plugin link` 装载后**什么都不做**。
 验收（0b）：七条假设逐条给出「实测通过 / 证伪 + 证据」；`kernel-errors` / `kernel-types` 的规格全部映射成断言。
 **两个 PR 都不对用户发布。**
+
+0a 必须为 R1/R2 的每个切片预建一个 3 行空实现，形如
+`export const transform: Transform = { name: 'rules/bash', features: ['honesty'], apply() {} }`，
+并在文件头写 `/** STUB — replaced by slice <slice 名> */`。这样并行切片只改自己那一个文件、永不碰 barrel。
+**轮次验收时用 `grep -rn 'STUB — replaced by slice' omp/src` 断言残留为零**——空实现被当成实现交付是最危险的失败模式。
+
+`ptc` 的 barrel 与桩**不在 0a 创建**：PTC 的接口取决于 R3 对 omp eval prelude 的实测结果，提前冻结等于凭空发明契约。
+改由 R3 的第一个切片 `ptc/outcome` 负责建 barrel、列出全部 5 个模块的静态 import 与桩，其余 4 个切片只填自己那一个文件。
 
 #### Round 1 · 诚实协议（5 个 PR 并行）
 
