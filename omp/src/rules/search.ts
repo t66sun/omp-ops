@@ -1,5 +1,6 @@
 import { OUTCOME_KEY, isMutableDetails, readOutcome, type OutcomeFacts, type ToolObservation } from '../host/contracts.ts'
 import { grepFacts, type GrepFacts } from '../host/guards.ts'
+import { coverageOf } from '../kernel/coverage.ts'
 import { errorPolicy } from '../kernel/errors.ts'
 import type { CoverageMeta } from '../kernel/outcome.ts'
 import type { Transform } from '../pipeline.ts'
@@ -143,17 +144,17 @@ function grepOutcome(o: ToolObservation): OutcomeFacts | undefined {
       // tell a consumer that a successful search was cancelled.
       retry: errorPolicy(SETTLED_CODE, 'none').retry,
       message: `grep scanned ${count(facts.fileCount, 'file', 'files')} and returned ${count(facts.matchCount, 'match', 'matches')}; coverage complete.`,
-      coverage: { scannedFiles: facts.fileCount, matchedCount: facts.matchCount, isComplete: true },
+      coverage: coverageOf({ scannedFiles: facts.fileCount, matchedCount: facts.matchCount, scanComplete: true }),
     }
   }
 
   const truncatedBy = causeOf(facts, timedOut) ?? (paged ? 'row-limit' : undefined)
-  const coverage: CoverageMeta = {
+  const coverage: CoverageMeta = coverageOf({
     scannedFiles: facts.fileCount,
     matchedCount: facts.matchCount,
-    isComplete: false,
+    scanComplete: false,
     ...(truncatedBy === undefined ? {} : { truncatedBy }),
-  }
+  })
   const missing = facts.missingPaths > 0
     ? ` ${count(facts.missingPaths, 'requested path', 'requested paths')} did not exist and was not searched.`
     : ''

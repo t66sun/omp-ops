@@ -7,7 +7,7 @@
  * the handler reads the registry per call, so a late registration still gets dispatched.
  */
 import { createHandler } from './handler.ts'
-import { attachOps } from '../ptc/install.ts'
+import { attachOps } from '../ptc/index.ts'
 
 export interface ExtensionApi {
   on(event: string, handler: (payload: unknown) => unknown): void
