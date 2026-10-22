@@ -66,6 +66,8 @@
 - `omp/` needs no build step and no Bun CLI: omp loads its `.ts` sources directly, and its tests run
   on Node's native type stripping — `node --test "omp/test/*.test.ts"`. **Quote the glob**: on Node 24
   the bare form resolves the directory and fails with `Cannot find module ...\omp\test`.
+- `node scripts/check-slices.mjs` proves the parallel-slice invariant: no two PR-numbered commits
+  touch the same file outside the frozen contracts, and every unnumbered commit that does is printed.
 - `node omp/scripts/smoke.mjs` is the live gate: it starts real `omp -p` sessions with the extension
   loaded and asserts on the tool payloads the host emitted. It needs `omp` on `PATH` (or `OMP_BIN`),
   costs ~20 s, and unit tests never replace it — they run in-process and cannot see the host.
