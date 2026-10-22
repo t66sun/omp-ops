@@ -317,15 +317,26 @@ barrel 与其中的空实现由 Round 0 一并创建，后续切片只填自己�
 
 **Round 1 结束即可发布**——这是第一个对用户有价值的增量，且不依赖去重。
 
-#### Round 2 · 读取去重（5 个 PR 并行；与 Round 3 可同时进行）
+#### Round 2 · 读取去重（6 个 PR 并行；与 Round 3 可同时进行）
 
 | PR | 切片 | 独占文件 | 依赖 | 断言 |
 |---|---|---|---|---|
-| `dedup/store` | 有界记录（16 agent / 32 条 / 2 MiB）+ epoch + 失效 | `omp/src/dedup/store.ts` | R0 | 任何非只读工具调用后 epoch++，全部记录失效；超限按 FIFO 淘汰 |
-| `dedup/evidence` | 文件 identity + key 构造 | `omp/src/dedup/evidence.ts` | R0 | dev/ino/size/mtimeNs/ctimeNs 任一不符即拒绝去重；revision 缺失即拒绝 |
-| `dedup/rewrite` | 引用行生成 + 单调缩短保证 | `omp/src/dedup/rewrite.ts` | R0 | 新正文字节数必须严格小于原正文，否则返回 undefined（不改） |
-| `dedup/target-read` | 从 read 结果提取 body/key | `omp/src/dedup/targets/read.ts` | R0 | 截断结果、hex 视图、多文件部分失败一律不参与去重 |
-| `dedup/target-grep` | 从 grep 结果提取 body/key | `omp/src/dedup/targets/grep.ts` | R0 | 分页结果与 `No matches found` 不参与去重 |
+| `dedup/store` | 有界记录（16 agent / 32 条 / 2 MiB）+ 按 `(agentKey, epoch, key)` 查 | `omp/src/dedup/store.ts` | R0 | 超限按 FIFO 淘汰；单条超过字节上限直接拒收而非清空全表；epoch 不符一律 miss |
+| `dedup/evidence` | 文件 identity + 存在性证明 | `omp/src/dedup/evidence.ts` | R0 | dev/ino/size/mtimeNs/ctimeNs 任一不符即拒绝；目录、符号链接、大小不符一律 `undefined` |
+| `dedup/rewrite` | 引用行生成 + 单调缩短保证 | `omp/src/dedup/rewrite.ts` | R0 | 新正文字节数必须严格小于原正文，否则返回 `undefined`（不改） |
+| `dedup/target-read` | 从 read 结果提取 body/key | `omp/src/dedup/targets/read.ts` | R0 | 截断结果、多文本块、URL/归档/图片、目录一律不参与去重 |
+| `dedup/target-grep` | 从 grep 结果提取 body/key | `omp/src/dedup/targets/grep.ts` | R0 | 分页结果、`No matches found`、任一截断标志为真时不参与去重 |
+| `dedup/coordinator` | 把 store / evidence / rewrite / targets 串成一个 `dedup/read` transform | `omp/src/dedup/coordinator.ts` | R0 + 上述 5 个 | 任一证明失败必须回退到**原文逐字下发**；改写只发生在 `content`，`details` 不受影响 |
+
+**与 DSH 原设计的唯一实质偏离（已定，不再讨论）**：DSH 用「重新扫描消息历史」证明正文还在上下文里
+（`read-evidence.ts` 要求恰好一条 `role==='tool'` 且 `id`/`toolCallId`/正文逐字匹配的消息，加一条匹配的
+assistant tool-call 块）。omp 的 `tool_result` 处理器拿不到消息历史，因此移植版改用 **epoch 证明**：
+epoch 在每次 `session_before_compact` / `session_compact` 与任何上下文重写时递增，epoch 变了即全部记录失效；
+同一 epoch 内再叠加「inode 未变」作为文件侧证明。代价是比原文弱：上下文被宿主以我们看不到的方式重写时，
+只能靠 compaction 事件兜底。收益是它不依赖宿主内部形状，不会随 omp 版本漂移而静默失效。
+
+`dedup/coordinator` 是第 6 个切片而非塞进 barrel：barrel 只在 import 时 `registerTransform(createDedup())`，
+切片只填 `coordinator.ts` 一个文件，六路仍然文件互斥。
 
 #### Round 3 · PTC SDK（5 个 PR 并行；与 Round 2 可同时进行）
 
@@ -362,15 +373,15 @@ barrel 与其中的空实现由 Round 0 一并创建，后续切片只填自己�
 
 | 轮 | 切片数 | 可并行 | 依赖 | 单人折算 | 对用户可发布 |
 |---|---|---|---|---|---|
-| 0 契约地基 | 1 | — | — | 3–5 天 | 否（内部骨架） |
+| 0 契约地基 | 2（0a 骨架 + 0b 运行时事实） | — | — | 3–5 天 | 否（内部骨架） |
 | 1 诚实协议 | 5 | 全并行 | R0 | 1.5 周 | **是** |
-| 2 读取去重 | 5 | 全并行，可与 R3 同期 | R0 | 1.5 周 | **是** |
+| 2 读取去重 | 6 | 全并行，可与 R3 同期 | R0 | 1.5 周 | **是** |
 | 3 PTC SDK | 5 | 全并行，可与 R2 同期 | R0 | 1.5 周 | **是** |
 | 4 原生补齐 | 0–2 | 全并行 | 失败场景 | 0–1 周 | 视场景 |
 | 5 表格/批处理 | 4 | 全并行 | R0（+R1 复用 Outcome） | 2 周 | **是** |
 | 6 打包发布 | 3 | 全并行 | R1 起任意轮 | 1 周 | 发布 |
 
-关键路径：`R0 → R1 → R6`，约 3–4 周；R2/R3 与 R5 全部挂在 R0 之后（R5 另复用 R1 的 Outcome 类型），**互不阻塞**。
+关键路径：`R0 → R1 → R6`，约 3–4 周；R2（6 切片）/R3 与 R5 全部挂在 R0 之后（R5 另复用 R1 的 Outcome 类型），**互不阻塞**。
 因此 4 个开发者并行时，总工期约等于关键路径（3–4 周），而不是 10 周。
 
 依赖图：
