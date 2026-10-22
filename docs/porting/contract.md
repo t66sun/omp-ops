@@ -232,6 +232,14 @@ plan around them.
    `truncatedBy: 'row-limit'` — even when that page happens to be the last one. Complete coverage is
    only claimed for a first page with no truncation flag.
 
+4. **Every extension entry gets its own module graph.** Two entries that import the same file each get
+   their own copy of it, so module-level state does not cross entries: measured, an entry that imported
+   the honesty barrel registered five transforms while the base entry's handler still saw an empty
+   registry. That is why each feature is a separate entry owning one `tool_result` handler over exactly
+   the transforms it imported, instead of one handler over a shared registry. The host does chain
+   handlers — the honesty outcome line and the PTC `%load` hint both land in one result, the later
+   handler seeing the earlier patch (asserted by the `ptc` smoke scenario).
+
 Two smaller ones, stated so they are not discovered later: only failures are classified, so a
 successful file read carries no `outcome.v1` facts; and `read`'s success path is dedup's business,
 not the honesty layer's.

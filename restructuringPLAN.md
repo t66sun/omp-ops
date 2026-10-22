@@ -555,6 +555,44 @@ globalThis.createOps = createOps
 
 实门禁已覆盖：`node omp/scripts/smoke.mjs ptc` 在一个真实会话里拿到同时含 `ops.mjs` 与 `ops.py` 绝对路径的 `%load` 行。
 
+#### 5.4.5 功能开关的真相：bracket 是「文件选择器」，且每个 entry 各有一份模块图
+
+这是把「三个功能做成一个入口」的设计判死的一对事实，都来自实测：
+
+**一、`features` 只选文件，且与 `extensions` 协同。** `omp/package.json` 的 `omp.features` 是**按功能名建键的对象**，
+每个值是 `{default?, extensions?, tools?, hooks?, commands?}`。装载器把被选中的功能的 `extensions` 追加到基础
+`omp.extensions` 之后。无 bracket（`enabledFeatures === null`，`[*]` 也归一化成 `null`）= 基础入口 + 所有
+`default:true` 的功能入口；`pkg[]` = 只有基础入口；`pkg[honesty]` = 基础入口 + 诚实入口。**没有任何通道把 bracket
+传进扩展代码**（`PI_PLUGIN` 在二进制里 0 次出现，`api.flagValues` 装载时为空，`registerFlag/getFlag` 只看得到扩展自己
+注册的 flag）。所以 `features` 不是运行时开关，是文件选择器；想让它有意义，只能**一个功能一个入口文件**。
+
+**二、每个 entry 各有一份模块图。** 两个 entry 引用同一个文件，各自得到一份副本，模块级状态不跨 entry。实测：一个
+entry 引用了诚实桶、注册了 5 个变换，而基础 entry 的处理器看到的注册表长度是 **0**（我在 `pipeline.ts` 里放一个
+`INSTANCE = Math.random()` 两头打印，两个值不同，才确认是两份模块实例而不是时序问题）。因此「一个处理器 + 共享注册表」
+的多入口方案不成立。
+
+两条事实合起来的落地形态（已合并，`d3bc1ee`）：
+
+| 文件 | 职责 | 处理器 |
+|---|---|---|
+| `omp/src/extension/index.ts` | 基础入口，**空的**（`export default function ompOps(): void {}`） | 无 |
+| `omp/src/extension/honesty.ts` | 引用 `rules/index.ts` + `render/index.ts` | `createHandler(['honesty'])` |
+| `omp/src/extension/dedup.ts` | 引用 `dedup/index.ts` | `createHandler(['dedup'])` |
+| `omp/src/extension/ptc.ts` | 引用 `ptc/index.ts`，`attachOps(pi)` | `createHandler(['ptc'])` |
+| `omp/src/extension/handler.ts` | `createHandler(owned)`：observe → runTransforms → 只在真的变了时返回补丁 | — |
+
+由此定下三条，别再退回旧形态：
+
+1. **基础入口必须为空**。`pkg[]` 唯一装载的就是它，一个空的工厂是「装上了但什么都不做」的诚实表达；如果它注册处理器，
+   一次「完全关掉」的安装仍然要为每个工具结果付出一次调用。
+2. **处理器归 entry，不归功能开关**。每个 entry 的注册表只装它自己 `import` 进来的变换，所以 `runTransforms(o, out, owned)`
+   的 `owned` 是自证，不是开关。
+3. **宿主确实会串处理器**（实测）：一个 `eval` 失败同时被诚实层（结果行）与 PTC 层（`%load` 提示）打补丁，后跑的看得到前
+   一个的补丁。`smoke.mjs` 的 `ptc` 场景把这条写成断言：结果行必须在 `%load` 行**之前**出现，且两行都在同一份 content 里。
+
+`attachTransforms` 因此改成「每个变换最多 attach 一次」的可重复调用（`attached: Set<Transform>`）：基础入口在功能模块被
+`import` 之前就跑完工厂，重复调用是正常路径，而同一变换被 attach 两次会让协调器两次订阅同一个会话事件。
+
 ### 5.5 PR 契约（每个切片都必须满足）
 
 1. 一个 issue 先落地，写明：切片名、**独占文件清单**、依赖的契约版本、验收断言、规模预算。PR 必须 link 并 claim 它。

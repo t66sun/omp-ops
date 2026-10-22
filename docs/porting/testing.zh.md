@@ -10,7 +10,7 @@
 在仓库根目录运行：
 
 ```sh
-node scripts/round-gate.mjs            # 全部六步
+node scripts/round-gate.mjs            # 全部七步
 node scripts/round-gate.mjs --no-live  # 没有 omp 的机器跳过活体步骤
 ```
 
@@ -19,14 +19,15 @@ node scripts/round-gate.mjs --no-live  # 没有 omp 的机器跳过活体步骤
 | # | 步骤 | 命令 | 问题 |
 | --- | --- | --- | --- |
 | 1 | `size` | `node scripts/check-file-size.mjs` | 有被跟踪的代码文件越过 1000 行规则吗？ |
-| 2 | `unit` | `node --test omp/test/*.test.ts` | 每个变换还通过自己的断言吗？ |
-| 3 | `stubs` | 扫描 `omp/src/**/*.ts` | 还有哪个切片是 `STUB — replaced by slice …` 的空操作？ |
-| 4 | `inert` | 在 `omp/src/{rules,render,dedup}/**` 中找 `apply(...) { }` | 有变换注册了空函数体吗？ |
-| 5 | `slices` | `node scripts/check-slices.mjs` | 任意两个切片碰过同一个文件吗？ |
-| 6 | `live` | `node omp/scripts/smoke.mjs` | 真实 omp 会话看得到结果吗？（需要 `omp` 在 `PATH` 上） |
+| 2 | `plugin` | `node scripts/check-omp.mjs` | 清单能解析、每个模块可达、没有发布 marketplace 装不下的东西吗？ |
+| 3 | `unit` | `node --test omp/test/*.test.ts` | 每个变换还通过自己的断言吗？ |
+| 4 | `stubs` | 扫描 `omp/src/**/*.ts` | 还有哪个切片是 `STUB — replaced by slice …` 的空操作？ |
+| 5 | `inert` | 在 `omp/src/{rules,render,dedup}/**` 中找 `apply(...) { }` | 有变换注册了空函数体吗？ |
+| 6 | `slices` | `node scripts/check-slices.mjs` | 任意两个切片碰过同一个文件吗？ |
+| 7 | `live` | `node omp/scripts/smoke.mjs` | 真实 omp 会话看得到结果吗？（需要 `omp` 在 `PATH` 上） |
 
-通过时每一步打印一行带耗时的 `ok`，并以 `round gate passed: 6 step(s)` 结束。失败步骤的输出打印在 `FAIL` 行下面，
-进程以 1 退出并输出 `round gate failed: N of 6 step(s)`。门禁是轮次的合并标准，不是形式：第 3、4 步之所以存在，
+通过时每一步打印一行带耗时的 `ok`，并以 `round gate passed: 7 step(s)` 结束。失败步骤的输出打印在 `FAIL` 行下面，
+进程以 1 退出并输出 `round gate failed: N of 7 step(s)`。门禁是轮次的合并标准，不是形式：第 3、4 步之所以存在，
 是因为空操作的变换能通过所有类型检查和所有「不抛异常」测试。
 
 ## 单元套件

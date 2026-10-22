@@ -12,7 +12,7 @@ well-written answer that did the wrong thing.
 From the repository root:
 
 ```sh
-node scripts/round-gate.mjs            # all six steps
+node scripts/round-gate.mjs            # all seven steps
 node scripts/round-gate.mjs --no-live  # skip the live step on a machine without omp
 ```
 
@@ -21,15 +21,16 @@ Each step answers a question a reviewer cannot answer from a diff:
 | # | Step | Command | Question |
 | --- | --- | --- | --- |
 | 1 | `size` | `node scripts/check-file-size.mjs` | Does any tracked code file break the 1000-line rule? |
-| 2 | `unit` | `node --test omp/test/*.test.ts` | Does every transform still pass its own assertions? |
-| 3 | `stubs` | scans `omp/src/**/*.ts` | Is any slice still a `STUB — replaced by slice …` no-op? |
-| 4 | `inert` | scans `omp/src/{rules,render,dedup}/**` for `apply(...) { }` | Is any transform registered with an empty body? |
-| 5 | `slices` | `node scripts/check-slices.mjs` | Did any two slices touch the same file? |
-| 6 | `live` | `node omp/scripts/smoke.mjs` | Does a real omp session see the result? (needs `omp` on `PATH`) |
+| 2 | `plugin` | `node scripts/check-omp.mjs` | Does the manifest resolve, is every module reachable, is anything shipped that the marketplace cannot install? |
+| 3 | `unit` | `node --test omp/test/*.test.ts` | Does every transform still pass its own assertions? |
+| 4 | `stubs` | scans `omp/src/**/*.ts` | Is any slice still a `STUB — replaced by slice …` no-op? |
+| 5 | `inert` | scans `omp/src/{rules,render,dedup}/**` for `apply(...) { }` | Is any transform registered with an empty body? |
+| 6 | `slices` | `node scripts/check-slices.mjs` | Did any two slices touch the same file? |
+| 7 | `live` | `node omp/scripts/smoke.mjs` | Does a real omp session see the result? (needs `omp` on `PATH`) |
 
 A passing run prints one `ok` line per step with its duration and ends with
-`round gate passed: 6 step(s)`. A failing step prints its output under the `FAIL` line and the run
-exits 1 with `round gate failed: N of 6 step(s)`. The gate is the merge criterion for a round, not
+`round gate passed: 7 step(s)`. A failing step prints its output under the `FAIL` line and the run
+exits 1 with `round gate failed: N of 7 step(s)`. The gate is the merge criterion for a round, not
 a formality: steps 3 and 4 exist because a no-op transform passes every type check and every
 "does not throw" test.
 
