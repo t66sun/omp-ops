@@ -8,6 +8,26 @@
   "omp": {
     "extensions": [
       "./src/extension/index.ts"
-    ]
+    ],
+    "features": {
+      "honesty": {
+        "default": true,
+        "extensions": [
+          "./src/extension/honesty.ts"
+        ]
+      },
+      "dedup": {
+        "default": true,
+        "extensions": [
+          "./src/extension/dedup.ts"
+        ]
+      },
+      "ptc": {
+        "default": true,
+        "extensions": [
+          "./src/extension/ptc.ts"
+        ]
+      }
+    }
   }
 }

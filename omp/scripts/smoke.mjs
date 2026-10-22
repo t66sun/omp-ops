@@ -13,18 +13,35 @@
  * OMP_BIN overrides the binary (default: `omp` on PATH).
  */
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-const EXTENSION = resolve(import.meta.dirname, '..', 'src', 'extension', 'index.ts')
+const ROOT = resolve(import.meta.dirname, '..')
+
+/**
+ * The entries to load, read from the manifest rather than hardcoded: the base entry plus every feature
+ * entry. `pkg[honesty]` is a *file selector*, so a wrongly spelled path here is exactly the failure this
+ * gate exists to catch — a name that does not resolve loads nothing and the scenario sees no outcome.
+ */
+function entries() {
+  const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+  const declared = [...(manifest.omp?.extensions ?? [])]
+  for (const feature of Object.values(manifest.omp?.features ?? {})) {
+    for (const entry of feature?.extensions ?? []) declared.push(entry)
+  }
+  return declared.map((entry) => resolve(ROOT, entry))
+}
+
+const EXTENSIONS = entries()
 const OMP = process.env.OMP_BIN ?? 'omp'
 const MAX_TIME = process.env.SMOKE_MAX_TIME ?? '180'
 
 function session(prompt, files) {
   const dir = mkdtempSync(join(tmpdir(), 'omp-ops-smoke-'))
   for (const [name, body] of Object.entries(files)) writeFileSync(join(dir, name), body)
-  const run = spawnSync(OMP, ['-p', '--mode', 'json', '-e', EXTENSION, '--max-time', MAX_TIME, prompt], {
+  const flags = EXTENSIONS.flatMap((entry) => ['-e', entry])
+  const run = spawnSync(OMP, ['-p', '--mode', 'json', ...flags, '--max-time', MAX_TIME, prompt], {
     cwd: dir, encoding: 'utf8', timeout: 900_000,
   })
   rmSync(dir, { recursive: true, force: true })
@@ -82,6 +99,14 @@ const scenarios = {
     const line = hinted[0].content.split('\n').find((l) => l.includes('%load'))
     if (!/%load "[^"]+ops\.mjs"/.test(line ?? '')) return [`the hint does not name the JS helper: ${JSON.stringify(line)}`]
     if (!/%load "[^"]+ops\.py"/.test(line ?? '')) return [`the hint does not name the Python helper: ${JSON.stringify(line)}`]
+    // Two entries registered a handler and both patched this one result: the outcome line comes from the
+    // honesty entry, the hint from the ptc entry. Asserting both, in that order, is the only assertion
+    // that proves the host chains handlers instead of letting the later one overwrite the earlier.
+    const body = hinted[0].content
+    const outcomeAt = body.indexOf('[outcome: ')
+    const loadAt = body.indexOf('%load')
+    if (outcomeAt === -1) return [`the ptc entry overwrote the honesty entry's outcome line: ${JSON.stringify(body.slice(-300))}`]
+    if (loadAt < outcomeAt) return [`the hint landed before the outcome line, so the later handler did not see the earlier one: ${JSON.stringify(body.slice(-300))}`]
     return []
   },
 

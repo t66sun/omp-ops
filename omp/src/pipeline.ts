@@ -29,6 +29,8 @@ export interface Transform {
 
 const registry: Transform[] = []
 const failed: string[] = []
+/** Transforms whose `attach` already ran, so a second entry cannot make one observe twice. */
+const attached = new Set<Transform>()
 
 /**
  * Rejects a duplicate name by throwing: two transforms sharing an identity make the edit history of
@@ -65,10 +67,17 @@ export function runTransforms(
   }
 }
 
-/** Calls every registered transform's `attach` once. A throwing `attach` is recorded, not fatal. */
+/**
+ * Attaches every transform that has not been attached yet. A throwing `attach` is recorded, not fatal.
+ *
+ * Repeatable on purpose: features are separate extension entries, so the base entry runs its factory
+ * before a feature's module is even imported. Each entry calls this after importing its own
+ * transforms, and the `attached` set is what keeps one transform from observing the session twice.
+ */
 export function attachTransforms(host: unknown): void {
   for (const t of registry) {
-    if (t.attach === undefined) continue
+    if (t.attach === undefined || attached.has(t)) continue
+    attached.add(t)
     try {
       t.attach(host)
     } catch {

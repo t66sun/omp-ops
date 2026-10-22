@@ -119,10 +119,20 @@ test('a payload without a call id observes as undefined callId rather than an em
   assert.equal(observe({ ...base, toolCallId: '' })?.callId, undefined, 'an empty id names nothing')
 })
 
-test('the real barrels register the rules then the renderer, in that order', async () => {
+const OWED = new Set(['rules/bash', 'rules/file', 'rules/search', 'rules/eval', 'honesty/render', 'dedup/read'])
+
+test('the base entry owns no feature transform', async () => {
   const { registeredTransforms } = await import('../src/pipeline.ts')
+  // `pkg[]` loads exactly this file, so an empty result here is the promise that a stripped install is inert.
   await import('../src/extension/index.ts')
-  const owned = new Set(['rules/bash', 'rules/file', 'rules/search', 'rules/eval', 'honesty/render', 'dedup/read'])
+  assert.deepEqual(registeredTransforms().map((t) => t.name).filter((n) => OWED.has(n)), [])
+})
+
+test('the feature entries register the rules, then the renderer, then dedup', async () => {
+  const { registeredTransforms } = await import('../src/pipeline.ts')
+  await import('../src/extension/honesty.ts')
+  await import('../src/extension/dedup.ts')
+  const owned = OWED
   assert.deepEqual(
     registeredTransforms().map((t) => t.name).filter((n) => owned.has(n)),
     ['rules/bash', 'rules/file', 'rules/search', 'rules/eval', 'honesty/render', 'dedup/read'],
@@ -170,6 +180,11 @@ test('attach runs once per transform and a throwing attach is recorded, not fata
   })
   attachTransforms(host)
   assert.equal(attached, 1, 'attach must be called exactly once')
+  // One call per feature entry: the base entry runs before any feature module is imported, so repeated
+  // calls are the normal path and the set must keep a transform from observing the session twice.
+  attachTransforms(host)
+  attachTransforms(host)
+  assert.equal(attached, 1, 'a repeated call must not re-attach')
   assert.ok(transformFailures().includes('attach/bad'), 'a throwing attach must be recorded')
   assert.ok(!transformFailures().includes('attach/good'))
 })
