@@ -34,6 +34,30 @@ exits 1 with `round gate failed: N of 7 step(s)`. The gate is the merge criterio
 a formality: steps 3 and 4 exist because a no-op transform passes every type check and every
 "does not throw" test.
 
+## The install check
+
+The round gate runs the extension from source, which cannot see the published path's failure mode: a
+marketplace install loads `omp.extensions` and nothing else, so a feature that lives in its own entry
+installs cleanly and then does nothing. Verify the shipped form by hand after any change to the
+manifest:
+
+```sh
+omp plugin marketplace add t66sun/omp-ops --scope user
+omp plugin install omp-ops@omp-ops --scope user
+omp -p "Run the bash command 'false' and report the exact output."
+```
+
+The answer must contain the rendered line, and the tool result must carry `details["outcome.v1"]`:
+
+```
+Command exited with code 1
+[outcome: error · effect unknown · retry after-input-change] Command exited with code 1; any file
+writes or other side effects before the exit are unknown.
+```
+
+No `-e` flag is passed: the point is that a fresh install works with nothing else done. Uninstall with
+`omp plugin uninstall omp-ops@omp-ops --scope user` when finished.
+
 ## The unit suite
 
 ```sh

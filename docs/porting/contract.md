@@ -232,13 +232,14 @@ plan around them.
    `truncatedBy: 'row-limit'` — even when that page happens to be the last one. Complete coverage is
    only claimed for a first page with no truncation flag.
 
-4. **Every extension entry gets its own module graph.** Two entries that import the same file each get
-   their own copy of it, so module-level state does not cross entries: measured, an entry that imported
-   the honesty barrel registered five transforms while the base entry's handler still saw an empty
-   registry. That is why each feature is a separate entry owning one `tool_result` handler over exactly
-   the transforms it imported, instead of one handler over a shared registry. The host does chain
-   handlers — the honesty outcome line and the PTC `%load` hint both land in one result, the later
-   handler seeing the earlier patch (asserted by the `ptc` smoke scenario).
+4. **There is one extension entry, and enabling a feature is installing the plugin.** Two host facts
+   force this. Every extension entry gets its own module graph, so two entries that import the same file
+   each get their own copy and module-level state does not cross entries — measured, an entry that
+   imported the honesty barrel registered five transforms while a sibling entry's handler still saw an
+   empty registry. And a marketplace install reads `omp.extensions` only: `omp.features` selects files
+   for an npm/link install, but the published path never looks at it, so per-feature entries install and
+   then load nothing. The features are therefore all wired from `src/extension/index.ts`, and the
+   `features` block is deliberately absent rather than present as a switch that selects no files.
 
 Two smaller ones, stated so they are not discovered later: only failures are classified, so a
 successful file read carries no `outcome.v1` facts; and `read`'s success path is dedup's business,

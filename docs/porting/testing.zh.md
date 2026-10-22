@@ -30,6 +30,28 @@ node scripts/round-gate.mjs --no-live  # 没有 omp 的机器跳过活体步骤
 进程以 1 退出并输出 `round gate failed: N of 7 step(s)`。门禁是轮次的合并标准，不是形式：第 3、4 步之所以存在，
 是因为空操作的变换能通过所有类型检查和所有「不抛异常」测试。
 
+## 安装校验
+
+轮次门禁是从源码加载扩展的，看不见发布路径特有的失败模式：marketplace 安装只读 `omp.extensions`，于是「功能放在独立
+entry 里」的插件能装上、然后什么都不做。改动清单之后手工验一次发布形态：
+
+```sh
+omp plugin marketplace add t66sun/omp-ops --scope user
+omp plugin install omp-ops@omp-ops --scope user
+omp -p "Run the bash command 'false' and report the exact output."
+```
+
+回答里必须有那行结果，工具结果必须带 `details["outcome.v1"]`：
+
+```
+Command exited with code 1
+[outcome: error · effect unknown · retry after-input-change] Command exited with code 1; any file
+writes or other side effects before the exit are unknown.
+```
+
+全程不带 `-e`：要证明的正是「装完什么都不用做就能生效」。验完用
+`omp plugin uninstall omp-ops@omp-ops --scope user` 卸掉。
+
 ## 单元套件
 
 ```sh

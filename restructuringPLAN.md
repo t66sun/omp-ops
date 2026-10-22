@@ -571,24 +571,41 @@ entry 引用了诚实桶、注册了 5 个变换，而基础 entry 的处理器�
 `INSTANCE = Math.random()` 两头打印，两个值不同，才确认是两份模块实例而不是时序问题）。因此「一个处理器 + 共享注册表」
 的多入口方案不成立。
 
-两条事实合起来的落地形态（已合并，`d3bc1ee`）：
+两条事实合起来，再加上第三条实测，定下了**单入口**的形态：
 
-| 文件 | 职责 | 处理器 |
-|---|---|---|
-| `omp/src/extension/index.ts` | 基础入口，**空的**（`export default function ompOps(): void {}`） | 无 |
-| `omp/src/extension/honesty.ts` | 引用 `rules/index.ts` + `render/index.ts` | `createHandler(['honesty'])` |
-| `omp/src/extension/dedup.ts` | 引用 `dedup/index.ts` | `createHandler(['dedup'])` |
-| `omp/src/extension/ptc.ts` | 引用 `ptc/index.ts`，`attachOps(pi)` | `createHandler(['ptc'])` |
-| `omp/src/extension/handler.ts` | `createHandler(owned)`：observe → runTransforms → 只在真的变了时返回补丁 | — |
+**三、marketplace 安装只读 `omp.extensions`。** 我把功能拆成三个 entry 后从 marketplace 装了一遍：装得上、基础入口的工厂跑了
+（`console.log` 可见），但三个功能入口一个都没加载——`omp plugin list --json` 里 marketplace 类插件根本没有 `manifest` 字段，
+只有 `id/scope/entries`。也就是说：**bracket 选文件只对 npm/link 安装成立；发布路径（marketplace + `git-subdir`）只能看见
+`omp.extensions`**。按功能拆 entry 会把「装上了但什么都不做」的插件发出去。
 
-由此定下三条，别再退回旧形态：
+于是最终形态（已合并）是一入口、一套模块图、一个处理器：
 
-1. **基础入口必须为空**。`pkg[]` 唯一装载的就是它，一个空的工厂是「装上了但什么都不做」的诚实表达；如果它注册处理器，
-   一次「完全关掉」的安装仍然要为每个工具结果付出一次调用。
-2. **处理器归 entry，不归功能开关**。每个 entry 的注册表只装它自己 `import` 进来的变换，所以 `runTransforms(o, out, owned)`
-   的 `owned` 是自证，不是开关。
-3. **宿主确实会串处理器**（实测）：一个 `eval` 失败同时被诚实层（结果行）与 PTC 层（`%load` 提示）打补丁，后跑的看得到前
-   一个的补丁。`smoke.mjs` 的 `ptc` 场景把这条写成断言：结果行必须在 `%load` 行**之前**出现，且两行都在同一份 content 里。
+| 文件 | 职责 |
+|---|---|
+| `omp/src/extension/index.ts` | 唯一 entry：引用 `rules` → `render` → `dedup` 三个桶与 `ptc/index.ts`，注册一个 `createHandler(['honesty','dedup','ptc'])`，再 `attachTransforms(pi)` 与 `attachOps(pi)` |
+| `omp/src/extension/handler.ts` | `createHandler(owned)`：observe → runTransforms → 只在真的变了时返回补丁 |
+
+`omp/package.json` 的 `omp` 块只剩 `extensions`；`features` 整块删除——留一组选不到任何文件的 `default:true` 声明，是给
+`omp plugin features` 看的假开关。功能取舍因此退化为**装/不装**，这一点写进了 `docs/porting/contract.md` 的局限清单。
+
+随之保留的两条实现约束：
+
+1. **处理器只有一处注册**（`extension/index.ts`），功能模块只 `registerTransform`。这条从头到尾没变过，也是 R2 风险（多个
+   `tool_result` 处理器互相覆盖）的根治办法。
+2. **`attachTransforms` 可重复调用**（`attached: Set<Transform>`），虽然单入口下只会调一次；它保证「一个变换最多 attach
+   一次」，而同一变换 attach 两次会让协调器两次订阅同一个会话事件。
+
+**发布路径的实测终局**（`omp plugin install omp-ops@omp-ops` 全新安装，命令行不带任何 `-e`）：
+
+```
+HAS_OUTCOME: True | CODE: EXIT_CODE
+CONTENT: (no output)
+
+Command exited with code 1
+[outcome: error · effect unknown · retry after-input-change] Command exited with code 1; any file writes or other side effects before the exit are unknown.
+```
+
+这条是 R6 的验收断言：**装完之后什么都不用做，模型看到的就是带结果行的内容**。
 
 `attachTransforms` 因此改成「每个变换最多 attach 一次」的可重复调用（`attached: Set<Transform>`）：基础入口在功能模块被
 `import` 之前就跑完工厂，重复调用是正常路径，而同一变换被 attach 两次会让协调器两次订阅同一个会话事件。
