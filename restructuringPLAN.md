@@ -210,27 +210,41 @@ export function errorPolicy(code: string, effectState?: EffectState): { status: 
 export interface ToolObservation {
   readonly tool: string                 // 'read' | 'grep' | 'glob' | 'bash' | 'edit' | 'write' | 'eval' | …
   readonly args: unknown
-  readonly content: readonly { type: string; text?: string }[]
+  readonly content: readonly unknown[]
   readonly details: unknown
   readonly isError: boolean
 }
-/** 形状不认识就返回 undefined：调用方必须原样直通，绝不猜测。 */
+/** 形状不认识就返回 undefined：调用方必须原样直通，绝不猜测。载荷是 {toolName,input,…}，只有这里知道。 */
 export function observe(raw: unknown): ToolObservation | undefined
-export function bashFacts(o: ToolObservation): { exitCode?: number; timedOut: boolean; aborted: boolean; denied: boolean } | undefined
-export function readFacts(o: ToolObservation): { paths: readonly string[]; truncated: boolean; selectorKind: 'none'|'range'|'raw'|'other' } | undefined
-export function grepFacts(o: ToolObservation): { matchCount: number; fileCount: number; truncated: boolean; fileLimitReached: boolean; perFileLimitReached: boolean; linesTruncated: boolean; missingPaths: number } | undefined
+/** 规则与渲染器之间唯一的约定键；v1 后缀是契约的一部分，换形状必须换键。 */
+export const OUTCOME_KEY = 'outcome.v1'
+export interface OutcomeFacts {
+  readonly status: 'completed' | 'partial' | 'rejected' | 'conflict' | 'error' | 'unknown'
+  readonly effectState: EffectState
+  readonly retry: RetryPolicy
+  readonly message: string
+  readonly code?: string
+  readonly nextAction?: string
+  readonly coverage?: CoverageMeta
+}
+export function isMutableDetails(value: unknown): value is Record<string, unknown>
+export function readOutcome(details: unknown): OutcomeFacts | undefined
+// bashFacts / readFacts / grepFacts 在 omp/src/host/guards.ts（0b 切片），不在 contracts.ts：
+// 类型是冻结的，提取器是运行时行为，分开放才能让 0a 不含任何解析逻辑。
 
 // omp/src/pipeline.ts —— 唯一注册点
 export type FeatureFlag = 'honesty' | 'dedup' | 'ptc'
-export interface MutableResult { content: { type: string; text?: string }[]; details: unknown; isError: boolean }
+export interface MutableResult { content: unknown[]; details: unknown; isError: boolean }
 export interface Transform {
   readonly name: string
   readonly features: readonly FeatureFlag[]
   /** 必须是全函数：不得抛异常，不得放大 content，不得改 isError。 */
   apply(o: ToolObservation, out: MutableResult): void
 }
-export function registerTransform(t: Transform): void
-export function runTransforms(o: ToolObservation, out: MutableResult, enabled: ReadonlySet<FeatureFlag>): void
+export function registerTransform(t: Transform): void        // 重名直接抛错：同名切片无法归因
+export function registeredTransforms(): readonly Transform[]
+export function runTransforms(o: ToolObservation, out: MutableResult, enabled: readonly FeatureFlag[]): void
+export function transformFailures(): readonly string[]       // 抛过错的切片名，去重保序
 
 // omp/src/dedup/types.ts —— 去重切片的共享形状
 export interface FileIdentity { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint }
@@ -241,21 +255,26 @@ export interface ReadRecord {
   readonly body: string         // 首次下发的逐字正文
   readonly bytes: number
   readonly identity: FileIdentity
-  readonly revision: string     // 64 位小写 hex，缺失即不可去重
+  readonly revision: string     // ⚠️ 我们自己算的 64 位 hex：omp 的 read 结果里没有 revision 字段
   readonly messageId?: string
   readonly callId?: string
 }
+export interface DedupCandidate { key: string; body: string; identity: FileIdentity; revision: string }
 export interface DedupTarget {
-  readonly tool: string
+  readonly name: string
   /** 从一次成功结果里取出可去重的正文与 key；不满足全部前提则 undefined。 */
-  extract(o: ToolObservation): { body: string; key: string; paths: readonly string[]; revision: string } | undefined
+  extract(o: ToolObservation): DedupCandidate | undefined
 }
 export interface Rewrite { readonly text: string }   // 只在严格短于原正文时产生
 ```
 
-骨架的装配方式（Round 0 一次定死）：`extension/index.ts` 静态 import `rules/index.ts`、`dedup/index.ts`、
-`ptc/index.ts` 三个 barrel，各自导出 `transform` 数组；barrel 与其中的空实现由 Round 0 一并创建，
-后续切片只填自己那一个文件。**轮末门禁会拒绝任何残留的空 transform。**
+骨架的装配方式（Round 0 一次定死）：`extension/index.ts` 按顺序静态 import `rules/index.ts`、`render/index.ts`、
+`dedup/index.ts` 三个 barrel，**import 顺序就是 run 顺序**——规则先写 `details['outcome.v1']`，渲染器最后读它。
+`ptc` 的 barrel 由 R3 第一个切片建（见 §5.3 Round 0 说明）。
+barrel 与其中的空实现由 Round 0 一并创建，后续切片只填自己那一个文件。**轮末门禁会拒绝任何残留的空 transform。**
+
+渲染器之所以是 transform 而不是被规则直接调用的函数：规则之间不许互相 import，否则 R1 的 5 个并行切片就
+不再文件互斥。规则只写结构化事实，渲染器独占「怎么把事实变成一行字」。
 
 ### 5.3 轮次表
 
@@ -287,11 +306,14 @@ export interface Rewrite { readonly text: string }   // 只在严格短于原正
 
 | PR | 切片 | 独占文件 | 依赖 | 断言 |
 |---|---|---|---|---|
-| `honesty/bash` | 退出码 / 超时 / 中止 / 拒绝 → effectState+retry | `omp/src/rules/bash.ts` | R0 | 退出码非零必须 `effectState:'unknown'` + `retry:'after-input-change'`（文档化的例外）；超时/中止不得变成 `EXIT_CODE` |
-| `honesty/file` | edit/write/read 失败分类 | `omp/src/rules/file.ts` | R0 | 陈旧 hashline tag、seen-line 拒绝、非普通文件、编码错误各自映射正确；**写入可能已发生时不得建议重试** |
-| `honesty/search` | grep/glob 覆盖度推导 + `SEARCH_STALE` | `omp/src/rules/search.ts` | R0 | `!truncated && !fileLimitReached && !perFileLimitReached && !missingPaths` 才算 `isComplete`；**构造 >2000 匹配的目录**验证原生 `maxCount` 截断是否会谎报完整 |
-| `honesty/eval` | eval/task/tool 错误分类 | `omp/src/rules/eval.ts` | R0 | `ToolError` / 取消 / 超时 / 内核崩溃（JS worker 被终止）各自映射；崩溃必须是 `unknown` |
-| `honesty/render` | 单行提示渲染 + `details.outcome.v1` 幂等标记 | `omp/src/render/outcome-line.ts` | R0 | 二次运行不重复追加；成功结果**一个字节都不改**；只缩不增 |
+| `honesty/bash` | 退出码 / 超时 / 中止 / 拒绝 → `details['outcome.v1']` 的 effectState+retry | `omp/src/rules/bash.ts` | R0 | 退出码非零必须 `effectState:'unknown'` + `retry:'after-input-change'`（文档化的例外）；超时/中止不得变成 `EXIT_CODE` |
+| `honesty/file` | edit/write/read 失败分类 → `details['outcome.v1']` | `omp/src/rules/file.ts` | R0 | 陈旧 hashline tag、seen-line 拒绝、非普通文件、编码错误各自映射正确；**写入可能已发生时不得建议重试** |
+| `honesty/search` | grep/glob 覆盖度推导 + `SEARCH_STALE` → `details['outcome.v1']` | `omp/src/rules/search.ts` | R0 | `!truncated && !fileLimitReached && !perFileLimitReached && !missingPaths` 才算 `isComplete`；**构造 >2000 匹配的目录**验证原生 `maxCount` 截断是否会谎报完整 |
+| `honesty/eval` | eval/task/tool 错误分类 → `details['outcome.v1']` | `omp/src/rules/eval.ts` | R0 | `ToolError` / 取消 / 超时 / 内核崩溃（JS worker 被终止）各自映射；崩溃必须是 `unknown` |
+| `honesty/render` | 消费 `details['outcome.v1']` 渲染单行提示（唯一改 `content` 的 R1 切片） | `omp/src/render/outcome-line.ts` | R0 | 二次运行不重复追加；成功结果**一个字节都不改**；只缩不增 |
+
+四个规则切片**只写 `details[OUTCOME_KEY]`，一个字都不往 `content` 里加**，因此它们彼此无需协调、也不必知道
+渲染格式；`honesty/render` 是 R1 里唯一碰 `content` 的切片，跑在最后。这条分工是 R1 能 5 路并行的前提。
 
 **Round 1 结束即可发布**——这是第一个对用户有价值的增量，且不依赖去重。
 
@@ -371,15 +393,41 @@ graph LR
 
 ### 5.4 七条假设（Round 0 的探针清单）
 
-| # | 假设 | 证伪后果 |
-|---|---|---|
-| H1 | 扩展的 `tool_result` 处理器能改写**内置** `read` 的 `content` | 去重层不成立，只能降级为 `additionalContext` 提示（收益大打折扣） |
-| H2 | `read` 在 `execute` 阶段记录 seen lines，晚于它的 `content` 改写不影响 `edit.enforceSeenLines` | 去重与编辑安全冲突，需改为「只在无编辑意图时去重」 |
-| H3 | `details.displayContent` 与 `content` 分离，改 `content` 不影响 TUI 渲染 | 去重会让人类看不到内容，须放弃或加 UI 开关 |
-| H4 | 扩展能从 `tool_result` 拿到 `details` 并附加 `details.outcome` 而不被后续处理器覆盖 | 诚实协议只能走 `additionalContext`，Round 3 的 typed 消费端失效 |
-| H5 | `eval` 能注入 `ops` 全局（extension prelude）或至少 `%load` 一个 helper 文件 | Round 3 退化为纯 helper 文件方案（可接受，但文档与入口需改） |
-| H6 | marketplace 安装会执行插件自身的 `bun install`（即带原生依赖的插件可走 marketplace） | 只能走 `omp plugin install <npm\|git>`；marketplace 仅适合零依赖插件，Round 6 的发布形态要改 |
-| H7 | 安装期 `#validateInstalledExtensions` 容忍 factory 里注册事件处理器（不视为初始化失败） | 注册必须推迟到 `session_start`，Round 0 的装配方式与测试方式都要改 |
+| # | 假设 | 状态 | 证伪后果 |
+|---|---|---|---|
+| H1 | 扩展的 `tool_result` 处理器能改写**内置** `read` 的 `content` | ✅ 已实测 | 去重层不成立，只能降级为 `additionalContext` 提示（收益大打折扣） |
+| H2 | `read` 在 `execute` 阶段记录 seen lines，晚于它的 `content` 改写不影响 `edit.enforceSeenLines` | 待验证 | 去重与编辑安全冲突，需改为「只在无编辑意图时去重」 |
+| H3 | `details.displayContent` 与 `content` 分离，改 `content` 不影响 TUI 渲染 | ✅ 结构已确认，视觉待 0b 确认 | 去重会让人类看不到内容，须放弃或加 UI 开关 |
+| H4 | 扩展能从 `tool_result` 拿到 `details` 并附加 `details.outcome` 而不被后续处理器覆盖 | 待验证 | 诚实协议只能走 `additionalContext`，Round 3 的 typed 消费端失效 |
+| H5 | `eval` 能注入 `ops` 全局（extension prelude）或至少 `%load` 一个 helper 文件 | 待验证 | Round 3 退化为纯 helper 文件方案（可接受，但文档与入口需改） |
+| H6 | marketplace 安装会执行插件自身的 `bun install`（即带原生依赖的插件可走 marketplace） | 待验证 | 只能走 `omp plugin install <npm\|git>`；marketplace 仅适合零依赖插件，Round 6 的发布形态要改 |
+| H7 | 安装期 `#validateInstalledExtensions` 容忍 factory 里注册事件处理器（不视为初始化失败） | ✅ 已实测 | 注册必须推迟到 `session_start`，Round 0 的装配方式与测试方式都要改 |
+
+#### 5.4.1 已取得的实测证据（omp 18.12.6，2026-10-22）
+
+探针方法：`%TEMP%/omp-probe-ops` 里放 `package.json`（`omp.extensions: ["./src/index.ts"]`）+ 一个 `.ts` 扩展，
+`omp plugin link <dir>` 后用 `omp -p` 实跑一次会话，扩展把观测写进日志文件。探针已卸载。
+
+1. **`.ts` 清单入口可以直接加载，不需要构建步骤。** 这坐实了 §5.1「`omp/` 无 build」的前提。
+2. **factory 的参数就是 ExtensionAPI 本体**（`argc === 1`）。它自己的 40 个 key 里有
+   `on, registerTool, registerCommand, getFlag, sendMessage, exec, setActiveTools, registerProvider, …`。
+   ⚠️ `api.pi` 是 **`@oh-my-pi/pi-coding-agent` 模块命名空间**（几百个类与常量导出），**不是** API；
+   `typeof api.pi.on === 'undefined'`。`api.extension` 是注册表存储，`api.events` 是 `{emit,on,clear}` 的事件器。
+3. **`tool_result` 的载荷是扁平对象，字段名与计划早期假设不同**：
+   ```json
+   {"type":"tool_result","toolName":"read","toolCallId":"call_00_…","input":{"path":"…"},
+    "content":[{"type":"text","text":"…"}],"details":{…},"isError":false}
+   ```
+   是 `toolName`/`input`，不是 `tool`/`args`。`observe()` 必须按真实字段名解析（内部仍用我们自己的 `tool`/`args` 命名）。
+4. **改写生效**：处理器返回 `{content, details, isError}` 后，模型原样收到了替换文本（实测模型逐字复述了注入的哨兵字符串）。
+   这是整个去重与诚实协议的地基，已坐实。
+5. **`read` 的 `details` 形状**（实测）：
+   `{totalLines, rowPrefixes, displayContent:{text,startLine,lineNumbers[]}, fileSize, meta:{source:{type:'path',value}, pagedSource}}`。
+   ⚠️ **没有 `revision`/哈希字段**。dsh-ops 的去重依赖读取结果自带的 `revision`，omp 没有，
+   因此 R2 的 `evidence.ts` 必须自己算 identity：`lstat` 的 `dev/ino/size/mtimeNs/ctimeNs` + 我们自己算的内容哈希，
+   `ReadRecord.revision` 是**我们生成的**值而非宿主给的。
+6. `omp plugin link` 只做文件系统挂载，**不导入扩展**（link 成功时零日志），所以装配失败要到会话启动才暴露。
+   这意味着 R6 的安装验收必须实跑一次会话，不能只看 `link` 返回码。
 
 ### 5.5 PR 契约（每个切片都必须满足）
 

@@ -1,0 +1,13 @@
+{
+  "name": "omp-ops",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "dsh-ops ported to omp: honest tool outcomes, read dedup, typed PTC SDK",
+  "omp": {
+    "extensions": [
+      "./src/extension/index.ts"
+    ]
+  }
+}
