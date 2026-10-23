@@ -100,8 +100,9 @@ function coverageOf(raw: unknown): CoverageMeta | undefined {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
   const value = raw as Record<string, unknown>
   const truncatedBy = typeof value.truncatedBy === 'string' ? TRUNCATIONS[value.truncatedBy] : undefined
+  const scannedFiles = typeof value.scannedFiles === 'number' ? count(value.scannedFiles) : undefined
   return {
-    scannedFiles: count(value.scannedFiles),
+    ...(scannedFiles === undefined ? {} : { scannedFiles }),
     matchedCount: count(value.matchedCount),
     isComplete: value.isComplete === true,
     ...(truncatedBy === undefined ? {} : { truncatedBy }),

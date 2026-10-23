@@ -34,6 +34,25 @@ const EPOCH_EVENTS = [
  */
 let epoch = 0
 
+/**
+ * The one line a rewrite keeps, so the notice names what is already in context. Without it the
+ * model is told "somewhere above" with no path, and an unnumbered body is dropped whole (see
+ * `rewrite.ts`). Reads name their path, greps their pattern and scope; anything else gets no subject
+ * and simply keeps the reference line alone.
+ */
+function subjectOf(o: ToolObservation): string | undefined {
+  const args: Record<string, unknown> =
+    typeof o.args === 'object' && o.args !== null ? (o.args as Record<string, unknown>) : {}
+  const path = typeof args.path === 'string' ? args.path : undefined
+  if (o.tool === 'read') return path === undefined ? undefined : `read ${path}`
+  if (o.tool === 'grep') {
+    const pattern = typeof args.pattern === 'string' ? args.pattern : undefined
+    if (pattern === undefined) return undefined
+    return `grep ${JSON.stringify(pattern)}${path === undefined ? '' : ` in ${path}`}`
+  }
+  return undefined
+}
+
 /** The targets the coordinator may act on, in match order: the first eligible one wins. */
 const DEFAULT_TARGETS: readonly DedupTarget[] = [readTarget, grepTarget]
 
@@ -145,7 +164,7 @@ export function createDedup(targets: readonly DedupTarget[] = DEFAULT_TARGETS): 
         // record was taken from — not this call, whose text is about to be replaced by the
         // reference itself. (Verified against the DSH original, `src/modes/native/read-dedup.ts`:
         // `unchangedContent(observation.body, entry.callId, messageId)`.)
-        const rewrite = rewriteBody(record.body, record.callId ?? o.callId ?? '', undefined)
+        const rewrite = rewriteBody(record.body, record.callId ?? o.callId ?? '', undefined, subjectOf(o))
         if (rewrite === undefined) return
         replaceBody(out, rewrite.text)
       } catch {

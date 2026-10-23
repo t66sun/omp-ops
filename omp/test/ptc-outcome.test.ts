@@ -81,7 +81,7 @@ test('coverage fields the kernel cannot read are sanitised, not passed through',
     details: withFacts({ coverage: { scannedFiles: 'many', matchedCount: -2, isComplete: true, truncatedBy: 'made-up' } as unknown as CoverageMeta }),
   }))
   if (outcome.status !== 'completed') assert.fail(`expected completed, received ${outcome.status}`)
-  assert.deepEqual(outcome.coverage, { scannedFiles: 0, matchedCount: 0, isComplete: true })
+  assert.deepEqual(outcome.coverage, { matchedCount: 0, isComplete: true })
 })
 
 test('a truncation cause is carried under the kernel spelling', () => {

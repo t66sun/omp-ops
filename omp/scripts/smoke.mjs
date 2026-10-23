@@ -142,7 +142,6 @@ const scenarios = {
 
   /** Reading the same unchanged file twice must not re-send the body. */
   dedup(events) {
-    const body = Array.from({ length: 40 }, (_, i) => `${i + 1} | line ${i + 1} of the fixture`).join('\n')
     const reads = executions(events).filter((e) => e.tool === 'read')
     if (reads.length < 2) return [`the model read ${reads.length} time(s), expected 2`]
     const problems = []
@@ -151,19 +150,29 @@ const scenarios = {
       problems.push(`the second read was not rewritten: ${JSON.stringify(reads[1].content.slice(0, 200))}`)
     }
     if (reads[1].content.length >= reads[0].content.length) problems.push('the rewritten read is not shorter')
+    if (!reads[1].content.includes('read data.txt')) problems.push('the rewrite does not name the file it replaced')
+    if (reads[1].content.includes('line 7 of the fixture')) problems.push('the rewrite re-sent the body')
     return problems
   },
 }
 
 const prompts = {
   eval: 'Use the eval tool with language js to run process.exit(3) and nothing else. Then reply DONE.',
-  file: 'Use the edit tool to replace the text alpha with beta in missing.txt. Do not create the file. Then reply DONE.',
+  // Stated as a mandatory action, not a goal: "do not create the file" alone let the model decide
+  // there was nothing to edit and answer without calling anything, which is not the behaviour under
+  // test. The scenario proves what a failed edit reports, so an attempt must be required.
+  file: 'Call the edit tool exactly once with path missing.txt, old_string alpha, new_string beta, even though that file does not exist. Never create it, never ask a question, never explain first. After the call fails, reply DONE.',
   honesty: 'Use the bash tool to run exactly this command: false    Then reply DONE.',
   dedup: 'Read data.txt, then read data.txt a second time. Do not use any other tool. Then reply DONE.',
   ptc: 'Use the eval tool with language py to run exactly this code and nothing else: await ops.read({"path": "x"})    Do not load anything first. Then reply DONE.',
 }
 
-const files = { 'data.txt': Array.from({ length: 40 }, (_, i) => `${i + 1} | line ${i + 1} of the fixture`).join('\n') }
+// Plain prose on purpose: omp's `read` emits the file's own text with no `N |` prefix, so a numbered
+// fixture would let the rewrite pass by stripping lines the host never sent. This is the shape the
+// model actually receives, which is the only fixture that can prove the rewrite works.
+const files = {
+  'data.txt': Array.from({ length: 40 }, (_, i) => `line ${i + 1} of the fixture`).join('\n'),
+}
 let scenarioEvents = {}
 
 const only = process.argv[2]

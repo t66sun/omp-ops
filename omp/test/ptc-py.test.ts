@@ -65,6 +65,12 @@ const FIXTURES: readonly Fixture[] = [
     details: withFacts({ coverage: { scannedFiles: 4, matchedCount: 2, isComplete: true } }, { files: ['a.txt'] }),
   }),
 
+  // Absence is information: a fact whose coverage carries no scanned count keeps it absent, in both
+  // languages, instead of coercing a missing value to zero.
+  fixture('grep', {
+    details: withFacts({ coverage: { matchedCount: 2, isComplete: true } }, { files: ['a.txt'] }),
+  }),
+
   // `time` is the search report's spelling of the time budget; the kernel spelling is `time-limit`.
   fixture('read', {
     details: withFacts({ coverage: { scannedFiles: 1, matchedCount: 0, isComplete: true, truncatedBy: 'time' } }),

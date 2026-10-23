@@ -33,8 +33,14 @@ type Outcome<T> =
 A `partial` result always carries a `coverage` record with `isComplete: false` and a
 `continuation` string; a `completed` result's coverage, when present, is narrowed to
 `isComplete: true` so a consumer cannot read a complete result as partial. `CoverageMeta` is
-`{ scannedFiles, matchedCount, isComplete, truncatedBy? }`, where `truncatedBy` is one of
+`{ scannedFiles?, matchedCount, isComplete, truncatedBy? }`, where `truncatedBy` is one of
 `scan-budget`, `output-budget`, `time-limit`, `row-limit`.
+
+`scannedFiles` is **absent** whenever the host does not report how many files it examined, which is
+always for `grep`: omp publishes the files that matched (`fileCount`), not the files scanned, so the
+field is omitted rather than filled with `fileCount` or with `0`. Absence is the honest statement —
+a consumer that reads a missing count as zero would report "searched nothing" about a search that
+found matches.
 
 ### Effects dominate retry advice
 
@@ -148,11 +154,25 @@ A recorded body stays valid until:
 - an identity proof fails, in which case the record stays a miss rather than being refreshed.
 
 A hit rewrites only when the compacted form is strictly shorter than the body, and names the call
-that actually carries the body:
+that actually carries the body. The shape depends on how the host renders a read, and both shapes are
+supported because getting this wrong is silent:
+
+- A **numbered** body (`12 | code`) loses its numbered lines and keeps the unnumbered framing.
+- An **unnumbered** body — what omp's `read` actually emits: the file's own text, no `N |` prefix, no
+  `[path#TAG]` header — has nothing to strip, so the body is dropped and only a subject line plus the
+  reference remain. The subject is what keeps the notice actionable:
 
 ```
+read omp/src/kernel/errors.ts
 [Notice: Unchanged file range; body already present in the current model context in tool call "<id>". Fresh read revalidated the revision above.]
 ```
+
+A body that already carries the reference line is never rewritten again, so a second hit cannot strip
+the surviving framing.
+
+Live measurement: the first read of a 40-line plain fixture returns ~1.1 KB; the second returns the
+subject plus the reference line. Seven live observations included one miss that returned the full body
+again, which is the designed failure direction — a miss costs bytes, never correctness.
 
 Live measurement: the first read of the fixture returned 1101 B; the second returned 173 B. Seven
 live observations included one miss that returned the full 1101 B again, which is the designed

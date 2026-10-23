@@ -11,7 +11,12 @@ export interface OpsErrorPayload {
   nextAction?: string
 }
 export interface CoverageMeta {
-  scannedFiles: number
+  /**
+   * How many files the scanner examined, and only when it can say so. Absent means the host reports
+   * no such count — `grep` reports only the files that matched — so a consumer must not read a
+   * missing value as zero: `matchedCount` alone is never a total either.
+   */
+  scannedFiles?: number
   matchedCount: number
   isComplete: boolean
   truncatedBy?: 'scan-budget' | 'output-budget' | 'time-limit' | 'row-limit'
@@ -23,7 +28,7 @@ export type Outcome<T> =
 
 interface SearchReportBase {
   pageComplete: boolean
-  scannedFiles: number
+  scannedFiles?: number
   skippedFiles: number
   skipReasons: Record<string, number>
   matchedObserved: number

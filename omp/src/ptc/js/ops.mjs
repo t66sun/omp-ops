@@ -185,10 +185,11 @@ function coverageOf(raw) {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
   const truncatedBy = typeof raw.truncatedBy === 'string' ? TRUNCATIONS.get(raw.truncatedBy) : undefined
   const coverage = {
-    scannedFiles: count(raw.scannedFiles),
     matchedCount: count(raw.matchedCount),
     isComplete: raw.isComplete === true,
   }
+  // Absence is information: `scannedFiles` is published only when the host reports it.
+  if (typeof raw.scannedFiles === 'number') coverage.scannedFiles = count(raw.scannedFiles)
   if (truncatedBy !== undefined) coverage.truncatedBy = truncatedBy
   return coverage
 }

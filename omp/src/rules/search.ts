@@ -101,8 +101,11 @@ function partialMessage(facts: GrepFacts, timedOut: boolean): string {
 }
 
 /**
- * Grep's own numbers, reduced to a coverage claim. `matchedCount`/`scannedFiles` carry the observed
- * page only; `OutcomeFacts` has no total field on purpose, so a partial result cannot leak one.
+ * Grep's own numbers, reduced to a coverage claim. `matchedCount` carries the observed page only;
+ * `OutcomeFacts` has no total field on purpose, so a partial result cannot leak one. `scannedFiles`
+ * is never published: `grep` reports how many files *matched*, not how many it examined, so writing
+ * that number there would claim work that may not have happened — the one thing this rule exists to
+ * prevent.
  *
  * `status` comes from the coverage formula, not from the error policy: search results speak the
  * kernel's coverage vocabulary (`completed`/`partial`), which `FailureStatus` cannot express. The
@@ -120,7 +123,7 @@ function grepOutcome(o: ToolObservation): OutcomeFacts | undefined {
       code: BUDGET_CODE,
       message: 'grep timed out before the scan finished: no matches observed, total unknown.',
       nextAction: 'Narrow the pattern or scope the path, then search again.',
-      coverage: { scannedFiles: 0, matchedCount: 0, isComplete: false, truncatedBy: 'time-limit' },
+      coverage: { matchedCount: 0, isComplete: false, truncatedBy: 'time-limit' },
     }
   }
   // An error payload with match counts is not a scan anyone can count on; leave it to the failure
@@ -143,14 +146,13 @@ function grepOutcome(o: ToolObservation): OutcomeFacts | undefined {
       // Derived, never literal. A complete scan has no error code at all: publishing one would
       // tell a consumer that a successful search was cancelled.
       retry: errorPolicy(SETTLED_CODE, 'none').retry,
-      message: `grep scanned ${count(facts.fileCount, 'file', 'files')} and returned ${count(facts.matchCount, 'match', 'matches')}; coverage complete.`,
-      coverage: coverageOf({ scannedFiles: facts.fileCount, matchedCount: facts.matchCount, scanComplete: true }),
+      message: `grep returned ${count(facts.matchCount, 'match', 'matches')} in ${count(facts.fileCount, 'file', 'files')}; coverage complete.`,
+      coverage: coverageOf({ matchedCount: facts.matchCount, scanComplete: true }),
     }
   }
 
   const truncatedBy = causeOf(facts, timedOut) ?? (paged ? 'row-limit' : undefined)
   const coverage: CoverageMeta = coverageOf({
-    scannedFiles: facts.fileCount,
     matchedCount: facts.matchCount,
     scanComplete: false,
     ...(truncatedBy === undefined ? {} : { truncatedBy }),
@@ -194,7 +196,7 @@ function globOutcome(o: ToolObservation): OutcomeFacts | undefined {
     code: BUDGET_CODE,
     message: `glob listed ${count(listed, 'path', 'paths')} and stopped at the result limit: more files exist than were shown, total unknown.`,
     nextAction: 'Narrow the glob or scope the path, then list again.',
-    coverage: { scannedFiles: listed, matchedCount: listed, isComplete: false, truncatedBy: 'row-limit' },
+    coverage: { matchedCount: listed, isComplete: false, truncatedBy: 'row-limit' },
   }
 }
 

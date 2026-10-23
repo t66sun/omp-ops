@@ -75,7 +75,9 @@ test('a scan with no cut is completed with isComplete true and observed counts',
   const facts = factsOf(out)
   assert.equal(facts.status, 'completed')
   assert.equal(facts.coverage?.isComplete, true)
-  assert.equal(facts.coverage?.scannedFiles, 3)
+  // omp reports the files that matched, never the files it examined, so the scanned count is absent
+  // rather than a zero that reads as "nothing was searched".
+  assert.equal(facts.coverage?.scannedFiles, undefined)
   assert.equal(facts.coverage?.matchedCount, 7)
   assert.equal(facts.coverage?.truncatedBy, undefined)
   assert.equal(facts.effectState, 'none')
@@ -176,6 +178,30 @@ test('a paged continuation is never reported as a complete scan', () => {
   assert.equal(facts.coverage?.isComplete, false)
   assert.equal(facts.coverage?.truncatedBy, 'row-limit')
   assert.ok(facts.message.includes('one page of a paged scan'))
+})
+
+test('no rule publishes a scanned-file count it was never given', () => {
+  // The host reports files that matched (`fileCount`), not files examined, so every grep/glob fact —
+  // complete or cut — must leave `scannedFiles` absent. A zero there would read as "searched nothing".
+  const complete = factsOf(applied(observation()))
+  assert.equal(complete.coverage?.scannedFiles, undefined)
+
+  const cut = factsOf(applied(observation({ details: details({ matchCount: 200, fileCount: 20, truncated: true, fileLimitReached: 20 }) })))
+  assert.equal(cut.coverage?.scannedFiles, undefined)
+  assert.equal(cut.coverage?.matchedCount, 200)
+
+  const timedOut = factsOf(applied(observation({ details: undefined, content: [{ type: 'text', text: 'Grep timed out after 30s; narrow the pattern.' }] })))
+  assert.equal(timedOut.coverage?.scannedFiles, undefined)
+
+  const globbed = factsOf(applied({
+    tool: 'glob',
+    args: {},
+    content: [{ type: 'text', text: 'x' }],
+    details: { fileCount: 9, resultLimitReached: 9 },
+    isError: false,
+  }))
+  assert.equal(globbed.coverage?.scannedFiles, undefined)
+  assert.equal(globbed.coverage?.matchedCount, 9)
 })
 
 test('the internal 2000-match cap is not a magic count: the flags carry it', () => {

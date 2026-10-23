@@ -10,6 +10,9 @@ const reference = (callId: string, messageId: string): string =>
 
 const REFERENCE = reference(CALL_ID, MESSAGE_ID)
 
+/** The phrase marking an already-rewritten body. */
+const REFERENCE_MARKER = '[Notice: Unchanged file range;'
+
 const countOf = (haystack: string, needle: string): number => haystack.split(needle).length - 1
 
 /** A realistic read body: numbered source lines plus the read tool's display notice. */
@@ -60,6 +63,32 @@ test('the rewrite is strictly shorter than the body it replaces', () => {
     Buffer.byteLength(result.text, 'utf8') < Buffer.byteLength(numberedBody, 'utf8'),
     'compacted body must save bytes',
   )
+})
+
+test('an unnumbered body is dropped whole: the subject and the reference survive', () => {
+  // omp's `read` emits plain text with no `N |` prefix, so there is nothing to strip. Keeping the
+  // body would make the notice longer than what it replaces, which is why the whole body goes.
+  const body = Array.from({ length: 40 }, (_, i) => `line ${i + 1} of a plain read body`).join('\n')
+  const result = rewriteBody(body, CALL_ID, undefined, 'read notes.txt')
+  assert.ok(result, 'a 40-line unnumbered body must compact')
+  const sole = `[Notice: Unchanged file range; body already present in the current model context in tool call ${JSON.stringify(CALL_ID)}. Fresh read revalidated the revision above.]`
+  assert.equal(result.text, `read notes.txt\n${sole}`)
+  assert.equal(result.text.includes('line 7 of a plain read body'), false, 'the body must not be re-sent')
+  assert.equal(countOf(result.text, REFERENCE_MARKER), 1, 'exactly one reference line')
+  assert.ok(Buffer.byteLength(result.text, 'utf8') < Buffer.byteLength(body, 'utf8'))
+})
+
+test('without a subject the unnumbered body still goes, leaving the reference alone', () => {
+  const body = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join('\n')
+  const result = rewriteBody(body, CALL_ID)
+  assert.ok(result)
+  assert.equal(result.text.split('\n').length, 1, 'one line only')
+  assert.equal(result.text.includes('line 40'), false)
+})
+
+test('a body that already carries the reference is never rewritten again', () => {
+  const body = `read notes.txt\n${REFERENCE}`
+  assert.equal(rewriteBody(body, CALL_ID, MESSAGE_ID, 'read notes.txt'), undefined)
 })
 
 test('a short unnumbered body returns undefined instead of growing', () => {

@@ -619,6 +619,32 @@ Command exited with code 1
 `attachTransforms` 因此改成「每个变换最多 attach 一次」的可重复调用（`attached: Set<Transform>`）：基础入口在功能模块被
 `import` 之前就跑完工厂，重复调用是正常路径，而同一变换被 attach 两次会让协调器两次订阅同一个会话事件。
 
+### 5.4.6 发布后被抓到的两处「门禁通过但功能是死的」
+
+安装版跑起来之后，在真实会话里复核了每一项自动行为，抓到两个同类缺陷：**断言证明的是夹具，不是宿主**。
+
+**缺陷一：去重从未在真实内容上触发过。** 我自己的会话里连续两次 `read omp/package.json`，第二次仍是完整正文。
+原因是宿主形态与参考实现不同：DSH 的 `read` 输出形如 `12 | code`，所以原实现剥掉行号行、留下框架行；而 omp 的 `read`
+输出是**文件原文**——没有 `[path#TAG]` 头，也没有 `N |` 前缀。剥不到东西 ⇒ 压缩结果比正文更长 ⇒ 严格变短的判定拒绝改写 ⇒
+去重永远不触发。更糟的是冒烟夹具自己带着行号（`${i+1} | line …`），于是门禁靠剥掉宿主根本没发过的文本通过——
+**一个自我实现的夹具**，绿得毫无意义。
+
+修法：`rewriteBody(body, callId, messageId?, subject?)` 分两种形态。带行号的正文照旧剥行；**不带行号的正文整体丢弃**，
+只留一行主题行（`read <path>` / `grep "<pattern>" in <path>`）加引用行——否则模型只会被告知「上面有」却不知道是哪个文件。
+已经带引用行的正文直接返回 `undefined`，第二次命中不会剥掉第一次幸存的框架。夹具改成纯文本，并新增两条断言：改写必须
+**指名文件**、**不得重发正文**。单测 343 → 345。
+
+**缺陷二：`grep` 报告了一个它从未得到的扫描数。** 在我自己的 kernel 里 `ops.grep` 返回
+`{"status":"completed","message":"grep scanned 0 files and returned 0 matches; coverage complete.","coverage":{"scannedFiles":0,…}}`，
+而那次搜索明明有命中。omp 的 grep `details` 里**没有**「扫过多少文件」这个字段：`fileCount` 是**命中文件数**。于是
+`scannedFiles: fileCount` 是对工作量的假声明——恰好出现在「专门用来防止假声明」的那一层。
+
+修法：`CoverageMeta.scannedFiles` 变为**可选**，缺失即「宿主不说自己扫过多少」；grep/glob 一律不发布该字段，完成态文案改为
+「returned N matches in M files」。TS 投影与 `ops.mjs`/`ops.py` 同步为「有才写、没有就不写」，绝不把缺失压成 0。
+新增断言：完成态、被截断、超时、glob 四种事实的 `coverage.scannedFiles === undefined`，两种语言 fixture 同步。
+
+**两处的共同教训**：门禁必须在宿主真实输出形态上运行。夹具的形态一旦由我们想象，断言就会替想象作证。
+
 ### 5.5 PR 契约（每个切片都必须满足）
 
 1. 一个 issue 先落地，写明：切片名、**独占文件清单**、依赖的契约版本、验收断言、规模预算。PR 必须 link 并 claim 它。

@@ -30,8 +30,12 @@ type Outcome<T> =
 
 `partial` 结果必定带一个 `isComplete: false` 的 `coverage` 记录和一个 `continuation` 字符串；`completed` 结果若带
 `coverage`，其类型被收窄为 `isComplete: true`，消费方无法把完整结果读成部分结果。`CoverageMeta` 为
-`{ scannedFiles, matchedCount, isComplete, truncatedBy? }`，其中 `truncatedBy` 取 `scan-budget`、`output-budget`、
+`{ scannedFiles?, matchedCount, isComplete, truncatedBy? }`，其中 `truncatedBy` 取 `scan-budget`、`output-budget`、
 `time-limit`、`row-limit` 之一。
+
+当宿主不说自己扫过多少个文件时，`scannedFiles` **缺省**；对 `grep` 而言永远缺省：omp 发布的是命中的文件
+（`fileCount`），不是扫过的文件，所以该字段宁可省略，也不拿 `fileCount` 或 `0` 去填。缺省才是诚实的陈述——
+把缺失的计数读成 0 的消费方，会对一次明明命中的搜索报告“什么都没扫”。
 
 ### 效果优先于重试建议
 
@@ -129,11 +133,22 @@ interface OutcomeFacts {
   `session_before_branch`——因为模型的上下文已不是记录正文时的那个；
 - 身份证明失败，此时记录保持未命中，而不是被刷新。
 
-命中时，只有压缩后的形态严格短于正文才改写，并且指名真正持有正文的那次调用：
+命中时，只有压缩后的形态严格短于正文才改写，并且指名真正持有正文的那次调用。改写形态取决于宿主如何渲染读取内容，
+两种都必须支持，因为搞错是**静默**的：
+
+- **带行号**的正文（`12 | code`）去掉行号行、保留无行号的框架行。
+- **不带行号**的正文——omp `read` 真实的输出形态：文件原文、没有 `N |` 前缀、没有 `[path#TAG]` 头——没有可剥的行，
+  于是正文整体丢弃，只留一行主题行加引用行。主题行是让提示可行动的关键：
 
 ```
+read omp/src/kernel/errors.ts
 [Notice: Unchanged file range; body already present in the current model context in tool call "<id>". Fresh read revalidated the revision above.]
 ```
+
+已经带有引用行的正文不会再被改写，所以第二次命中不会剥掉第一次幸存下来的框架。
+
+活体实测：40 行纯文本夹具第一次读取约 1.1 KB，第二次返回主题行加引用行。七次活体观测中有一次未命中，重新返回完整正文；
+这是设计上允许的失败方向——未命中只花字节，不损正确性。
 
 活体实测：夹具第一次读取返回 1101 B，第二次返回 173 B。七次活体观测中有一次未命中，重新返回完整的 1101 B；
 这是设计上允许的失败方向——未命中只花字节，不损正确性。

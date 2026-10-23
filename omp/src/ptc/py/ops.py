@@ -182,11 +182,13 @@ def _coverage_of(raw):
         return None
     truncated_by = raw.get('truncatedBy')
     coverage = {
-        'scannedFiles': _count(raw.get('scannedFiles')),
         'matchedCount': _count(raw.get('matchedCount')),
         # `is True`, not truthiness: `1` is not a completeness claim in the JS helper either.
         'isComplete': raw.get('isComplete') is True,
     }
+    # Absence is information: `scannedFiles` is published only when the host reports it.
+    if isinstance(raw.get('scannedFiles'), (int, float)) and not isinstance(raw.get('scannedFiles'), bool):
+        coverage['scannedFiles'] = _count(raw.get('scannedFiles'))
     if isinstance(truncated_by, str) and truncated_by in TRUNCATIONS:
         coverage['truncatedBy'] = TRUNCATIONS[truncated_by]
     return coverage

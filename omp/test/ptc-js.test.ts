@@ -186,6 +186,9 @@ const FIXTURES: readonly Fixture[] = [
   fixture('a completed fact carrying complete coverage', payload(withFacts({
     coverage: { scannedFiles: 4, matchedCount: 2, isComplete: true, truncatedBy: 'time' },
   }, { files: ['a.txt'] }))),
+  fixture('a completed fact whose coverage carries no scanned count', payload(withFacts({
+    coverage: { matchedCount: 2, isComplete: true },
+  }))),
   fixture('a completed fact whose coverage contradicts it', payload(withFacts({
     coverage: { scannedFiles: 4, matchedCount: 2, isComplete: false, truncatedBy: 'scan-budget' },
   }))),
